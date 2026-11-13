@@ -23,5 +23,8 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # The bot only updates plugins already in krew-index; until the first
+      # version is merged there, this step can't succeed.
       - name: Update krew-index
+        continue-on-error: true
         uses: rajatjindal/krew-release-bot@v0.0.47
