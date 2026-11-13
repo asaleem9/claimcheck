@@ -160,19 +160,12 @@ func run(ctx context.Context, snap *snapshot.Snapshot, rep *Report, pod *corev1.
 	for _, c := range pending {
 		skip.Insert(c.UID)
 	}
-	allocState, owners := snap.AllocatedState(skip)
-	slices, taints := snap.EffectiveSlices()
-	celCache := cel.NewCache(1000, features.CEL(opts.Features))
-
+	dg := NewDiagnoser(snap, opts.Features, skip)
 	ev, err := verdict.New(ctx, verdict.Input{
-		Features: opts.Features, Allocated: allocState, Classes: snap.ClassLister(), Slices: slices, CEL: celCache,
+		Features: opts.Features, Allocated: dg.Allocated, Classes: dg.Classes, Slices: dg.Slices, CEL: dg.CEL,
 	})
 	if err != nil {
 		return nil, err
-	}
-	dg := &diagnose.Diagnoser{
-		Features: opts.Features, Classes: snap.ClassLister(), Slices: slices,
-		Allocated: allocState, Owners: owners, Taints: taints, CEL: celCache,
 	}
 
 	nodes := make([]*corev1.Node, 0, len(snap.Nodes))
@@ -235,6 +228,19 @@ func run(ctx context.Context, snap *snapshot.Snapshot, rep *Report, pod *corev1.
 	}
 	rep.Hints = hints(rep)
 	return rep, nil
+}
+
+// NewDiagnoser builds the cluster state shared by every node: allocations
+// (ignoring the claims in skip), slices with taint rules applied, and a
+// CEL cache.
+func NewDiagnoser(snap *snapshot.Snapshot, f structured.Features, skip sets.Set[types.UID]) *diagnose.Diagnoser {
+	allocState, owners := snap.AllocatedState(skip)
+	slices, taints := snap.EffectiveSlices()
+	return &diagnose.Diagnoser{
+		Features: f, Classes: snap.ClassLister(), Slices: slices,
+		Allocated: allocState, Owners: owners, Taints: taints,
+		CEL: cel.NewCache(1000, features.CEL(f)),
+	}
 }
 
 // excluded reports why a pod can't use a node for reasons outside DRA that

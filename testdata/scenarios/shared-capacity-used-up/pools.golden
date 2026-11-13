@@ -1,0 +1,13 @@
+
+DRA capacity  1 node · 1 pool
+
+  DEVICECLASS       TOTAL   IN USE   SHARED   TAINTED   BLOCKED   UNAVAILABLE   FREE
+  gpu.example.com   1       0        1        0         0         0             0
+
+worker · pool worker-shared  gpu.example.com
+  ▓  1 shared
+  nic-0 bandwidth   ████████████████░░░░   8G of 10G used by 2 claims
+    nic-0   ▓ shared   serving/llm-a-net, serving/llm-b-net
+
+legend  █ in use ▓ shared ▚ tainted ▒ blocked × unavailable ░ free
+

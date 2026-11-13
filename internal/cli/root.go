@@ -45,7 +45,7 @@ says so instead of guessing.`,
 	root.PersistentFlags().StringVar(&g.from, "from", "", "read cluster state from a snapshot file instead of the API server")
 	root.PersistentFlags().StringVar(&g.features, "features", "", "override DRA feature gates, e.g. DRADerivedAttributes=true,DRAConsumableCapacity=false")
 
-	root.AddCommand(newExplain(g), newSnapshot(g), newVersion(g))
+	root.AddCommand(newExplain(g), newPools(g), newSnapshot(g), newVersion(g))
 	return root
 }
 

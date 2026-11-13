@@ -1,0 +1,22 @@
+
+DRA capacity  3 nodes · 2 pools
+
+  DEVICECLASS       TOTAL   IN USE   SHARED   TAINTED   BLOCKED   UNAVAILABLE   FREE
+  gpu.example.com   8       0        0        4         0         0             4
+
+worker-a · pool worker-a  gpu.example.com
+  ░░░░  4 free
+    gpu-0   ░ free   
+    gpu-1   ░ free   
+    gpu-2   ░ free   
+    gpu-3   ░ free   
+
+worker-b · pool worker-b  gpu.example.com
+  ▚▚▚▚  4 tainted
+    gpu-0   ▚ tainted   taint example.com/maintenance=driver-upgrade:NoSchedule (DeviceTaintRule maintenance-worker-b)
+    gpu-1   ▚ tainted   taint example.com/maintenance=driver-upgrade:NoSchedule (DeviceTaintRule maintenance-worker-b)
+    gpu-2   ▚ tainted   taint example.com/maintenance=driver-upgrade:NoSchedule (DeviceTaintRule maintenance-worker-b)
+    gpu-3   ▚ tainted   taint example.com/maintenance=driver-upgrade:NoSchedule (DeviceTaintRule maintenance-worker-b)
+
+legend  █ in use ▓ shared ▚ tainted ▒ blocked × unavailable ░ free
+

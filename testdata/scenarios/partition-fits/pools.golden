@@ -1,0 +1,27 @@
+
+DRA capacity  1 node · 1 pool
+
+  DEVICECLASS       TOTAL   IN USE   SHARED   TAINTED   BLOCKED   UNAVAILABLE   FREE
+  gpu.example.com   14      1        0        0         1         0             12
+
+worker · pool worker  gpu.example.com
+  █▒░░░░░░░░░░░░  1 in use · 1 blocked · 12 free
+  gpu-0 memory   █████░░░░░░░░░░░░░░░   20Gi of 80Gi used · largest free partition 40Gi
+  gpu-1 memory   ░░░░░░░░░░░░░░░░░░░░   0 of 80Gi used · largest free partition 80Gi
+    gpu-0-full        ▒ blocked   needs memory=80Gi of counter set gpu-0, 60Gi left; used by gpu-0-quarter-0
+    gpu-0-half-0      ░ free      
+    gpu-0-half-1      ░ free      
+    gpu-0-quarter-0   █ in use    ml/notebook
+    gpu-0-quarter-1   ░ free      
+    gpu-0-quarter-2   ░ free      
+    gpu-0-quarter-3   ░ free      
+    gpu-1-full        ░ free      
+    gpu-1-half-0      ░ free      
+    gpu-1-half-1      ░ free      
+    gpu-1-quarter-0   ░ free      
+    gpu-1-quarter-1   ░ free      
+    gpu-1-quarter-2   ░ free      
+    gpu-1-quarter-3   ░ free      
+
+legend  █ in use ▓ shared ▚ tainted ▒ blocked × unavailable ░ free
+

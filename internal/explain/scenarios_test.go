@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	resourceapi "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/asaleem9/claimcheck/internal/explain"
 	"github.com/asaleem9/claimcheck/internal/features"
@@ -314,8 +316,16 @@ func TestScenarios(t *testing.T) {
 			if err := render.Text(&buf, rep, render.TextOptions{Style: render.Plain(), Devices: true}); err != nil {
 				t.Fatal(err)
 			}
+			// The pools view of the same cluster.
+			var pools bytes.Buffer
+			inv := explain.NewDiagnoser(snap, f, sets.New[types.UID]()).Inventory(context.Background())
+			if err := render.Pools(&pools, render.PoolsReport{Nodes: len(snap.Nodes), Pools: inv}, render.TextOptions{Style: render.Plain(), Devices: true}); err != nil {
+				t.Fatal(err)
+			}
+
 			dir := filepath.Join("..", "..", "testdata", "scenarios", sc.name)
 			golden := filepath.Join(dir, "explain.golden")
+			poolsGolden := filepath.Join(dir, "pools.golden")
 			if *update {
 				data, err := snap.Marshal()
 				if err != nil {
@@ -324,7 +334,15 @@ func TestScenarios(t *testing.T) {
 				must(t, os.MkdirAll(dir, 0o755))
 				must(t, os.WriteFile(filepath.Join(dir, "snapshot.yaml"), data, 0o644))
 				must(t, os.WriteFile(golden, buf.Bytes(), 0o644))
+				must(t, os.WriteFile(poolsGolden, pools.Bytes(), 0o644))
 				return
+			}
+			wantPools, err := os.ReadFile(poolsGolden)
+			if err != nil {
+				t.Fatalf("%v (run go test ./internal/explain -update)", err)
+			}
+			if !bytes.Equal(wantPools, pools.Bytes()) {
+				t.Errorf("pools output differs from %s (run with -update to accept):\n%s", poolsGolden, pools.String())
 			}
 			want, err := os.ReadFile(golden)
 			if err != nil {
