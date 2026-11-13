@@ -119,9 +119,9 @@ func badge(s Style, st explain.Status) string {
 	case explain.Allocated:
 		return s.Badge("1;30;42", "ALLOCATED")
 	case explain.Blocked:
-		return s.Badge("1;37;41", "BLOCKED")
+		return s.Badge("1;30;41", "BLOCKED")
 	case explain.AllocatorError:
-		return s.Badge("1;37;41", "ERROR")
+		return s.Badge("1;30;41", "ERROR")
 	default:
 		return s.Badge("1;30;43", "UNEXPLAINED")
 	}
