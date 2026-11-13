@@ -182,6 +182,13 @@ func nodeWhy(n explain.NodeReport) string {
 		}
 		parts = append(parts, requestWhy(r))
 	}
+	if c := n.Diagnosis.ConstraintFailure; c != "" {
+		if f := strings.Fields(c); len(f) >= 2 && strings.HasSuffix(f[0], "Attribute") {
+			parts = append(parts, f[0]+" "+f[1]+" can't be satisfied")
+		} else {
+			parts = append(parts, "constraints conflict")
+		}
+	}
 	if n.Diagnosis.Contention != "" {
 		parts = append(parts, "requests compete for the same devices")
 	}

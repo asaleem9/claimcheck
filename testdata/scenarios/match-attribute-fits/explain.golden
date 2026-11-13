@@ -1,0 +1,25 @@
+
+pod ml/tp-train  (Pending)
+
+ FITS   The claims can be allocated on 1 of 1 eligible node.
+
+Claims
+  nvlinked   pending   
+
+Nodes (allocator verdict · why)
+  worker   ✓ fits   a→gpu-1, b→gpu-2
+
+Notes
+  • the pod is Pending even though DRA would fit; check other scheduling constraints or whether the scheduler has retried since the cluster changed
+
+Devices on worker
+  REQUEST   DEVICE         RESULT     DETAIL
+  a         worker/gpu-0   ✗ in use   allocated to ml/other
+  a         worker/gpu-1   ✓ usable   
+  a         worker/gpu-2   ✓ usable   
+  a         worker/gpu-3   ✓ usable   
+  b         worker/gpu-0   ✗ in use   allocated to ml/other
+  b         worker/gpu-1   ✓ usable   
+  b         worker/gpu-2   ✓ usable   
+  b         worker/gpu-3   ✓ usable   
+

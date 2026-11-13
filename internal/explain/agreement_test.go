@@ -38,6 +38,13 @@ func TestAgreement(t *testing.T) {
 	taint := resourceapi.DeviceTaint{Key: "example.com/unhealthy", Effect: resourceapi.DeviceTaintEffectNoSchedule}
 	toleration := resourceapi.DeviceToleration{Key: "example.com/unhealthy", Operator: resourceapi.DeviceTolerationOpExists}
 
+	skipped, checked := 0, 0
+	defer func() {
+		t.Logf("%d node checks, %d left unexplained by design", checked, skipped)
+		if skipped*100 > checked {
+			t.Errorf("more than 1%% of nodes unexplained (%d of %d)", skipped, checked)
+		}
+	}()
 	for seed := range uint64(iterations) {
 		r := rand.New(rand.NewPCG(seed, 42))
 		b := tu.New().GPUClass()
@@ -52,6 +59,12 @@ func TestAgreement(t *testing.T) {
 				if r.IntN(8) == 0 {
 					g.Taints = []resourceapi.DeviceTaint{taint}
 				}
+				// Topology attributes for constraints; sometimes missing.
+				g.Extra = map[string]string{}
+				if r.IntN(5) > 0 {
+					g.Extra["nvlink"] = []string{"a", "b", "c"}[r.IntN(3)]
+				}
+				g.Extra["numa"] = []string{"0", "1"}[r.IntN(2)]
 				gpus = append(gpus, g)
 			}
 			if len(gpus) > 0 {
@@ -93,6 +106,26 @@ func TestAgreement(t *testing.T) {
 			cn := fmt.Sprintf("claim-%d", c)
 			b.Claim("ns", cn, reqs...)
 			claimNames = append(claimNames, cn)
+			// Constraints over all requests or a random subset, sometimes
+			// naming a firstAvailable alternative directly.
+			for range r.IntN(3) {
+				var names []string
+				for _, q := range reqs {
+					switch {
+					case r.IntN(2) == 0:
+					case len(q.FirstAvailable) > 0 && r.IntN(2) == 0:
+						names = append(names, q.Name+"/"+q.FirstAvailable[r.IntN(2)].Name)
+					default:
+						names = append(names, q.Name)
+					}
+				}
+				attr := []string{"gpu.example.com/nvlink", "gpu.example.com/numa"}[r.IntN(2)]
+				if r.IntN(3) == 0 {
+					b.DistinctAttribute(attr, names...)
+				} else {
+					b.MatchAttribute(attr, names...)
+				}
+			}
 		}
 		b.Pod("ns", "pod", nil, claimNames...)
 
@@ -101,6 +134,11 @@ func TestAgreement(t *testing.T) {
 			t.Fatalf("seed %d: %v", seed, err)
 		}
 		for _, n := range rep.Nodes {
+			checked++
+			if !n.Agree && len(n.Diagnosis.Unanalyzed) > 0 {
+				skipped++ // the solver gave up honestly; counted below
+				continue
+			}
 			if !n.Agree {
 				data, _ := b.S.Marshal()
 				t.Fatalf("seed %d, node %s: allocator fits=%v err=%q, diagnosis fits=%v contention=%q\nsnapshot:\n%s",

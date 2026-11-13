@@ -24,9 +24,10 @@ const (
 )
 
 type scenario struct {
-	name   string
-	build  func() *tu.B
-	status explain.Status
+	name     string
+	build    func() *tu.B
+	features string
+	status   explain.Status
 }
 
 var scenarios = []scenario{
@@ -135,18 +136,56 @@ var scenarios = []scenario{
 		status: explain.Blocked,
 	},
 	{
-		name: "match-attribute-unexplained",
+		name: "match-attribute",
 		build: func() *tu.B {
-			b := tu.New().Node("worker", nil).GPUClass().Slice("worker",
-				tu.GPU{Name: "gpu-0", Model: "H100", Memory: "80Gi", Extra: map[string]string{"nvlink": "domain-a"}},
-				tu.GPU{Name: "gpu-1", Model: "H100", Memory: "80Gi", Extra: map[string]string{"nvlink": "domain-b"}},
-			)
-			return b.Claim("ml", "nvlinked", tu.Req{Name: "a"}, tu.Req{Name: "b"}).
+			return nvlinkNode().Allocated("ml", "other", "worker", "gpu-1").
+				Claim("ml", "nvlinked", tu.Req{Name: "a"}, tu.Req{Name: "b"}).
 				MatchAttribute("gpu.example.com/nvlink", "a", "b").
 				Pod("ml", "tp-train", nil, "nvlinked")
 		},
-		status: explain.Unexplained,
+		status: explain.Blocked,
 	},
+	{
+		name: "match-attribute-fits",
+		build: func() *tu.B {
+			return nvlinkNode().Allocated("ml", "other", "worker", "gpu-0").
+				Claim("ml", "nvlinked", tu.Req{Name: "a"}, tu.Req{Name: "b"}).
+				MatchAttribute("gpu.example.com/nvlink", "a", "b").
+				Pod("ml", "tp-train", nil, "nvlinked")
+		},
+		status: explain.Fits,
+	},
+	{
+		name: "distinct-attribute",
+		build: func() *tu.B {
+			return nvlinkNode().Claim("ml", "spread", tu.Req{Name: "gpus", Count: 3}).
+				DistinctAttribute("gpu.example.com/nvlink").
+				Pod("ml", "spread-train", nil, "spread")
+		},
+		status: explain.Blocked,
+	},
+	{
+		name: "derived-attribute-unexplained",
+		build: func() *tu.B {
+			return nvlinkNode().Claim("ml", "nvlinked", tu.Req{Name: "a", Derived: map[string]string{"example.com/fabric": `"fabric-" + device.attributes["gpu.example.com"].model`}},
+				tu.Req{Name: "b", Derived: map[string]string{"example.com/fabric": `device.attributes["gpu.example.com"].?nvlink.orValue("none")`}}).
+				MatchAttribute("example.com/fabric", "a", "b").
+				Pod("ml", "tp-train", nil, "nvlinked")
+		},
+		features: "DRADerivedAttributes=true",
+		status:   explain.Unexplained,
+	},
+}
+
+// nvlinkNode has one worker with two NVLink domains: gpu-0 alone in
+// domain-a, gpu-1 and gpu-2 in domain-b, and gpu-3 with no NVLink.
+func nvlinkNode() *tu.B {
+	return tu.New().Node("worker", nil).GPUClass().Slice("worker",
+		tu.GPU{Name: "gpu-0", Model: "H100", Memory: "80Gi", Extra: map[string]string{"nvlink": "domain-a"}},
+		tu.GPU{Name: "gpu-1", Model: "H100", Memory: "80Gi", Extra: map[string]string{"nvlink": "domain-b"}},
+		tu.GPU{Name: "gpu-2", Model: "H100", Memory: "80Gi", Extra: map[string]string{"nvlink": "domain-b"}},
+		tu.GPU{Name: "gpu-3", Model: "H100", Memory: "80Gi"},
+	)
 }
 
 func TestScenarios(t *testing.T) {
@@ -154,11 +193,18 @@ func TestScenarios(t *testing.T) {
 		t.Run(sc.name, func(t *testing.T) {
 			snap := sc.build().S
 			pod := snap.Pods[0]
-			rep, err := explain.Pod(context.Background(), snap, pod.Namespace, pod.Name, explain.Options{Features: features.Default()})
+			f, err := features.Parse(sc.features)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rep, err := explain.Pod(context.Background(), snap, pod.Namespace, pod.Name, explain.Options{Features: f})
 			if err != nil {
 				t.Fatal(err)
 			}
 			if rep.Status != sc.status {
+				for _, n := range rep.Nodes {
+					t.Logf("node %s verdict=%+v", n.Node, n.Verdict)
+				}
 				t.Errorf("status = %s, want %s\nsummary: %s\nhints: %q", rep.Status, sc.status, rep.Summary, rep.Hints)
 			}
 			// Every eligible node must agree unless the scenario is about disagreement.

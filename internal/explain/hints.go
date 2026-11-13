@@ -64,6 +64,7 @@ func hints(rep *Report) []string {
 		}
 	}
 	var contention []string
+	constraintErr := ""
 	var unanalyzed []string
 	for _, n := range rep.Nodes {
 		for _, r := range n.Diagnosis.Requests {
@@ -74,6 +75,12 @@ func hints(rep *Report) []string {
 			for _, alt := range r.Alternatives {
 				add(n, alt)
 			}
+		}
+		if n.Excluded == "" && IsConstraintError(n.Verdict.Err) && constraintErr == "" {
+			constraintErr = fmt.Sprintf("The allocator stops with an error on %s instead of trying other devices: a device for an allocationMode: All request breaks one of the claim's constraints.\n    All-mode requests take every matching device, so each of them must satisfy the claim's matchAttribute/distinctAttribute constraints.", n.Node)
+		}
+		if n.Excluded == "" && n.Diagnosis.ConstraintFailure != "" {
+			contention = append(contention, fmt.Sprintf("On %s the requests can get enough devices, but not ones that satisfy the claim's constraints:\n    %s", n.Node, n.Diagnosis.ConstraintFailure))
 		}
 		if n.Excluded == "" && n.Diagnosis.Contention != "" {
 			contention = append(contention, fmt.Sprintf("On %s every request can be met on its own, but not all at once:\n    %s", n.Node, n.Diagnosis.Contention))
@@ -92,6 +99,9 @@ func hints(rep *Report) []string {
 		out = append(out, requestHints(v)...)
 	}
 	out = append(out, contention...)
+	if constraintErr != "" {
+		out = append(out, constraintErr)
+	}
 	if rep.Status == Unexplained {
 		msg := "claimcheck could not explain the allocator's decision on every node; trust the verdict column, not the reasons."
 		if len(unanalyzed) > 0 {

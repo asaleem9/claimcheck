@@ -10,12 +10,16 @@ Nodes (allocator verdict · why)
   worker   ✗   ⚠ unexplained: allocator says no, claimcheck says fits
 
 Why
-  claimcheck could not explain the allocator's decision on every node; trust the verdict column, not the reasons. The claims use features claimcheck doesn't model yet: ml/nvlinked: matchAttribute gpu.example.com/nvlink.
+  claimcheck could not explain the allocator's decision on every node; trust the verdict column, not the reasons. The claims use features claimcheck doesn't model yet: ml/nvlinked: matchAttribute example.com/fabric (uses a CEL-derived attribute).
 
 Devices on worker
   REQUEST   DEVICE         RESULT     DETAIL
   a         worker/gpu-0   ✓ usable   
   a         worker/gpu-1   ✓ usable   
+  a         worker/gpu-2   ✓ usable   
+  a         worker/gpu-3   ✓ usable   
   b         worker/gpu-0   ✓ usable   
   b         worker/gpu-1   ✓ usable   
+  b         worker/gpu-2   ✓ usable   
+  b         worker/gpu-3   ✓ usable   
 

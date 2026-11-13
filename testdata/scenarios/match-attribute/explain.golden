@@ -1,0 +1,26 @@
+
+pod ml/tp-train  (Pending)
+
+ BLOCKED   No eligible node can allocate the claims (1 node checked).
+
+Claims
+  nvlinked   pending   
+
+Nodes (allocator verdict · why)
+  worker   ✗   matchAttribute gpu.example.com/nvlink can't be satisfied
+
+Why
+  On worker the requests can get enough devices, but not ones that satisfy the claim's constraints:
+      matchAttribute gpu.example.com/nvlink on "a" and "b" needs 2 devices with the same value; usable devices: nvlink=domain-a: gpu-0 · nvlink=domain-b: gpu-2 · not set: gpu-3
+
+Devices on worker
+  REQUEST   DEVICE         RESULT     DETAIL
+  a         worker/gpu-0   ✓ usable   
+  a         worker/gpu-1   ✗ in use   allocated to ml/other
+  a         worker/gpu-2   ✓ usable   
+  a         worker/gpu-3   ✓ usable   
+  b         worker/gpu-0   ✓ usable   
+  b         worker/gpu-1   ✗ in use   allocated to ml/other
+  b         worker/gpu-2   ✓ usable   
+  b         worker/gpu-3   ✓ usable   
+

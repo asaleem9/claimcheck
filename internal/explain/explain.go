@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	resourceapi "k8s.io/api/resource/v1"
@@ -190,11 +191,15 @@ func run(ctx context.Context, snap *snapshot.Snapshot, rep *Report, pod *corev1.
 		}
 		switch {
 		case nr.Verdict.Err != "":
-			nr.Agree = hasFatal(nr.Diagnosis)
+			nr.Agree = hasFatal(nr.Diagnosis) || IsConstraintError(nr.Verdict.Err)
 		case nr.Verdict.NodeReason != "":
 			nr.Agree = true
 		default:
 			nr.Agree = nr.Verdict.Fits == nr.Diagnosis.Fits
+			// A "no" only counts as explained if the diagnosis names a reason.
+			if !nr.Verdict.Fits && !hasReason(nr.Diagnosis) {
+				nr.Agree = false
+			}
 		}
 		if nr.Excluded == "" {
 			eligible++
@@ -255,6 +260,27 @@ func excluded(f structured.Features, pod *corev1.Pod, allocated []*resourceapi.R
 		}
 	}
 	return ""
+}
+
+// IsConstraintError recognizes the allocator's hard error for a device of an
+// allocationMode: All request that breaks a claim constraint. The allocator
+// doesn't backtrack in that case, so the error itself is the explanation.
+func IsConstraintError(err string) bool {
+	return strings.Contains(err, "because a claim constraint would not be satisfied")
+}
+
+// hasReason reports whether the diagnosis found a concrete reason the
+// claims don't fit, as opposed to giving up on an unmodeled feature.
+func hasReason(n diagnose.Node) bool {
+	if n.Contention != "" || n.ConstraintFailure != "" {
+		return true
+	}
+	for _, r := range n.Requests {
+		if !r.Satisfied {
+			return true
+		}
+	}
+	return false
 }
 
 // hasFatal reports whether the diagnosis found something the allocator

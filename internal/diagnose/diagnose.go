@@ -12,11 +12,11 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	resourceapi "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/dynamic-resource-allocation/cel"
 	"k8s.io/dynamic-resource-allocation/resourceclaim"
 	"k8s.io/dynamic-resource-allocation/structured"
@@ -94,6 +94,9 @@ type Node struct {
 	// Contention is set when each request could be met on its own but not
 	// all of them at once, because they compete for the same devices.
 	Contention string `json:"contention,omitempty"`
+	// ConstraintFailure is set when the requests could get distinct devices,
+	// but not ones that satisfy a matchAttribute/distinctAttribute constraint.
+	ConstraintFailure string `json:"constraintFailure,omitempty"`
 	// Unanalyzed lists claim features the diagnosis doesn't model yet, which
 	// is the likely cause if it disagrees with the verdict.
 	Unanalyzed []string `json:"unanalyzed,omitempty"`
@@ -127,6 +130,12 @@ func (d *Diagnoser) Diagnose(ctx context.Context, node *corev1.Node, claims []*r
 	if err != nil {
 		return out, err
 	}
+	byID := make(map[structured.DeviceID]*resourceapi.Device, len(devices))
+	for _, c := range devices {
+		dev := &c.slice.Spec.Devices[c.index]
+		byID[structured.MakeDeviceID(c.slice.Spec.Driver, c.slice.Spec.Pool.Name, dev.Name)] = dev
+	}
+	var cons []constraintSpec
 	for _, claim := range claims {
 		name := claim.Namespace + "/" + claim.Name
 		for _, req := range claim.Spec.Devices.Requests {
@@ -156,30 +165,72 @@ func (d *Diagnoser) Diagnose(ctx context.Context, node *corev1.Node, claims []*r
 			out.Requests = append(out.Requests, r)
 		}
 		for _, c := range claim.Spec.Devices.Constraints {
+			spec := constraintSpec{claim: name, requests: sets.New(c.Requests...)}
 			switch {
 			case c.MatchAttribute != nil:
-				out.Unanalyzed = append(out.Unanalyzed, fmt.Sprintf("%s: matchAttribute %s", name, *c.MatchAttribute))
+				spec.attr = *c.MatchAttribute
 			case c.DistinctAttribute != nil:
-				out.Unanalyzed = append(out.Unanalyzed, fmt.Sprintf("%s: distinctAttribute %s", name, *c.DistinctAttribute))
+				spec.attr, spec.distinct = *c.DistinctAttribute, true
+			default:
+				out.Unanalyzed = append(out.Unanalyzed, name+": constraint of unknown type")
+				continue
 			}
+			if why := unmodeled(claim, spec); why != "" {
+				out.Unanalyzed = append(out.Unanalyzed, fmt.Sprintf("%s: %s %s (%s)", name, spec.kind(), spec.attr, why))
+				continue
+			}
+			cons = append(cons, spec)
 		}
 	}
 	if out.Fits {
-		out.Contention = resolve(out.Requests)
-		out.Fits = out.Contention == ""
+		var unknown bool
+		out.Contention, out.ConstraintFailure, unknown = resolve(out.Requests, cons, lookupValue(byID))
+		out.Fits = out.Contention == "" && out.ConstraintFailure == ""
+		if unknown {
+			out.Fits = false
+			out.ConstraintFailure = ""
+			out.Unanalyzed = append(out.Unanalyzed, "constraint search exceeded its budget or met list-typed attributes")
+		}
 	}
 	return out, nil
+}
+
+// unmodeled returns why a constraint can't be analyzed, or "".
+func unmodeled(claim *resourceapi.ResourceClaim, c constraintSpec) string {
+	for _, r := range claim.Spec.Devices.Requests {
+		var derived []resourceapi.DeviceDerivedAttribute
+		admin := false
+		if r.Exactly != nil {
+			derived, admin = r.Exactly.DerivedAttributes, ptr.Deref(r.Exactly.AdminAccess, false)
+		}
+		for _, sub := range r.FirstAvailable {
+			derived = append(derived, sub.DerivedAttributes...)
+		}
+		if c.requests.Len() > 0 && !c.requests.Has(r.Name) {
+			continue
+		}
+		for _, da := range derived {
+			if da.Name == c.attr {
+				return "uses a CEL-derived attribute"
+			}
+		}
+		if admin {
+			return "applies to an adminAccess request"
+		}
+	}
+	return ""
 }
 
 // maxCombinations bounds the search over firstAvailable alternatives.
 const maxCombinations = 4096
 
 // resolve picks one alternative per firstAvailable request such that all
-// requests can be served with distinct devices. Like the allocator, it
-// prefers earlier alternatives and backtracks to later ones when devices
-// collide. It sets Chosen on each request and returns "" on success, or a
-// description of the contention for the preferred combination.
-func resolve(reqs []Request) string {
+// requests can be served with distinct devices that satisfy the claims'
+// constraints. Like the allocator, it prefers earlier alternatives and
+// backtracks to later ones. It sets Chosen on each request. On failure it
+// explains the preferred combination: device contention or a constraint.
+// unknown means the search was cut short and the answer can't be trusted.
+func resolve(reqs []Request, cons []constraintSpec, value valueFunc) (contention, constraint string, unknown bool) {
 	var choices [][]int // per request: satisfiable alternative indices
 	var multi []int     // indices of requests with alternatives
 	combos := 1
@@ -197,18 +248,20 @@ func resolve(reqs []Request) string {
 		multi = append(multi, i)
 		combos *= len(sat)
 	}
-	preferred := contention(reqs)
-	if preferred == "" || len(multi) == 0 || combos > maxCombinations {
-		return preferred
+	if combos > maxCombinations {
+		return "", "", true
 	}
 	pos := make([]int, len(multi))
 	for {
 		for k, i := range multi {
 			reqs[i].Chosen = choices[k][pos[k]]
 		}
-		if contention(reqs) == "" {
-			return ""
+		s := &solver{slots: buildSlots(reqs), cons: cons, value: value, budget: backtrackBudget}
+		ok, unk := s.solve(cons)
+		if ok {
+			return "", "", false
 		}
+		unknown = unknown || unk
 		// Advance in lexicographic order: last request varies fastest, so
 		// earlier requests keep their preferred alternative the longest.
 		k := len(pos) - 1
@@ -227,7 +280,12 @@ func resolve(reqs []Request) string {
 	for k, i := range multi {
 		reqs[i].Chosen = choices[k][0]
 	}
-	return preferred
+	if unknown {
+		return "", "", true
+	}
+	s := &solver{slots: buildSlots(reqs), cons: cons, value: value, budget: backtrackBudget}
+	contention, constraint = s.explain()
+	return contention, constraint, false
 }
 
 // devicesFor returns the devices the allocator would consider for node, the
@@ -454,87 +512,6 @@ func formatTaint(t resourceapi.DeviceTaint) string {
 		s += "=" + t.Value
 	}
 	return "taint " + s + ":" + string(t.Effect)
-}
-
-// contention checks whether all satisfied requests can be met at the same
-// time with distinct devices, using bipartite matching between the devices
-// each request needs and the devices usable for it.
-func contention(reqs []Request) string {
-	type slot struct {
-		request string
-		options []structured.DeviceID
-	}
-	var slots []slot
-	for _, r := range reqs {
-		if len(r.Alternatives) > 0 && r.Chosen >= 0 {
-			r = r.Alternatives[r.Chosen]
-		}
-		if r.AdminAccess {
-			continue
-		}
-		var usable []structured.DeviceID
-		for _, dv := range r.Devices {
-			if dv.Reason == Available {
-				usable = append(usable, dv.ID())
-			}
-		}
-		if r.Mode == resourceapi.DeviceAllocationModeAll {
-			for _, id := range usable {
-				slots = append(slots, slot{r.Name, []structured.DeviceID{id}})
-			}
-			continue
-		}
-		for range r.Needed {
-			slots = append(slots, slot{r.Name, usable})
-		}
-	}
-	if len(slots) < 2 {
-		return ""
-	}
-	owner := map[structured.DeviceID]int{}
-	var try func(i int, seen map[structured.DeviceID]bool) bool
-	try = func(i int, seen map[structured.DeviceID]bool) bool {
-		for _, id := range slots[i].options {
-			if seen[id] {
-				continue
-			}
-			seen[id] = true
-			if j, taken := owner[id]; !taken || try(j, seen) {
-				owner[id] = i
-				return true
-			}
-		}
-		return false
-	}
-	matched := 0
-	for i := range slots {
-		if try(i, map[structured.DeviceID]bool{}) {
-			matched++
-		}
-	}
-	if matched == len(slots) {
-		return ""
-	}
-	// Name the requests that couldn't all be served and the devices they share.
-	var names, devices []string
-	seenReq, seenDev := map[string]bool{}, map[structured.DeviceID]bool{}
-	needed := 0
-	for _, s := range slots {
-		if !seenReq[s.request] {
-			seenReq[s.request] = true
-			names = append(names, strconv.Quote(s.request))
-		}
-		needed++
-		for _, id := range s.options {
-			if !seenDev[id] {
-				seenDev[id] = true
-				devices = append(devices, id.Device.String())
-			}
-		}
-	}
-	sort.Slice(devices, func(i, j int) bool { return naturalLess(devices[i], devices[j]) })
-	return fmt.Sprintf("%s need %d devices between them but can only use %d: %s",
-		strings.Join(names, " and "), needed, len(devices), strings.Join(devices, ", "))
 }
 
 // ShortCELError drops the advice the CEL library appends to runtime errors

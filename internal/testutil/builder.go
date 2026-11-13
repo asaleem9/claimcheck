@@ -96,6 +96,8 @@ type Req struct {
 	Tolerations []resourceapi.DeviceToleration
 	// FirstAvailable, when set, turns the request into a prioritized list.
 	FirstAvailable []Req
+	// Derived maps derived attribute names to CEL expressions.
+	Derived map[string]string
 }
 
 // Claim adds an unallocated claim.
@@ -108,7 +110,17 @@ func (b *B) Claim(ns, name string, reqs ...Req) *B {
 	return b
 }
 
-// Constraint adds a matchAttribute constraint to the last claim.
+// DistinctAttribute adds a distinctAttribute constraint to the last claim.
+func (b *B) DistinctAttribute(attr string, requests ...string) *B {
+	c := &b.S.ResourceClaims[len(b.S.ResourceClaims)-1]
+	c.Spec.Devices.Constraints = append(c.Spec.Devices.Constraints, resourceapi.DeviceConstraint{
+		Requests:          requests,
+		DistinctAttribute: ptr.To(resourceapi.FullyQualifiedName(attr)),
+	})
+	return b
+}
+
+// MatchAttribute adds a matchAttribute constraint to the last claim.
 func (b *B) MatchAttribute(attr string, requests ...string) *B {
 	c := &b.S.ResourceClaims[len(b.S.ResourceClaims)-1]
 	c.Spec.Devices.Constraints = append(c.Spec.Devices.Constraints, resourceapi.DeviceConstraint{
@@ -149,6 +161,11 @@ func exact(r Req) *resourceapi.ExactDeviceRequest {
 	}
 	for _, s := range r.Selectors {
 		ex.Selectors = append(ex.Selectors, resourceapi.DeviceSelector{CEL: &resourceapi.CELDeviceSelector{Expression: s}})
+	}
+	for name, expr := range r.Derived {
+		ex.DerivedAttributes = append(ex.DerivedAttributes, resourceapi.DeviceDerivedAttribute{
+			Name: resourceapi.FullyQualifiedName(name), Expression: expr,
+		})
 	}
 	return ex
 }

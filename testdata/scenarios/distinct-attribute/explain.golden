@@ -1,0 +1,22 @@
+
+pod ml/spread-train  (Pending)
+
+ BLOCKED   No eligible node can allocate the claims (1 node checked).
+
+Claims
+  spread   pending   
+
+Nodes (allocator verdict · why)
+  worker   ✗   distinctAttribute gpu.example.com/nvlink can't be satisfied
+
+Why
+  On worker the requests can get enough devices, but not ones that satisfy the claim's constraints:
+      distinctAttribute gpu.example.com/nvlink on "gpus" needs 3 devices with different values; usable devices: nvlink=domain-a: gpu-0 · nvlink=domain-b: gpu-1, gpu-2 · not set: gpu-3
+
+Devices on worker
+  REQUEST   DEVICE         RESULT     DETAIL
+  gpus      worker/gpu-0   ✓ usable   
+  gpus      worker/gpu-1   ✓ usable   
+  gpus      worker/gpu-2   ✓ usable   
+  gpus      worker/gpu-3   ✓ usable   
+
