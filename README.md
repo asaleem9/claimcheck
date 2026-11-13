@@ -113,6 +113,8 @@ kubectl claimcheck explain podgroup/train-gang -n ml
 
 ### What would change it
 
+![whatif --suggest and pools on a kind cluster](docs/whatif.gif)
+
 ```sh
 # Which single change (freeing one claim, removing one taint rule) would let it fit?
 kubectl claimcheck whatif pod/llm-train -n ml --suggest
