@@ -134,3 +134,35 @@ func strip(m *metav1.ObjectMeta) {
 	m.ManagedFields = nil
 	delete(m.Annotations, "kubectl.kubernetes.io/last-applied-configuration")
 }
+
+// DeepCopy returns an independent copy, so hypothetical changes never touch
+// the original.
+func (s *Snapshot) DeepCopy() *Snapshot {
+	out := &Snapshot{APIVersion: s.APIVersion, Kind: s.Kind, Metadata: *s.Metadata.DeepCopy()}
+	for i := range s.Nodes {
+		out.Nodes = append(out.Nodes, *s.Nodes[i].DeepCopy())
+	}
+	for i := range s.Pods {
+		out.Pods = append(out.Pods, *s.Pods[i].DeepCopy())
+	}
+	for i := range s.DeviceClasses {
+		out.DeviceClasses = append(out.DeviceClasses, *s.DeviceClasses[i].DeepCopy())
+	}
+	for i := range s.ResourceSlices {
+		out.ResourceSlices = append(out.ResourceSlices, *s.ResourceSlices[i].DeepCopy())
+	}
+	for i := range s.ResourceClaims {
+		out.ResourceClaims = append(out.ResourceClaims, *s.ResourceClaims[i].DeepCopy())
+	}
+	for i := range s.DeviceTaintRules {
+		out.DeviceTaintRules = append(out.DeviceTaintRules, *s.DeviceTaintRules[i].DeepCopy())
+	}
+	return out
+}
+
+// DeepCopy copies the metadata.
+func (m *Metadata) DeepCopy() *Metadata {
+	out := *m
+	m.CapturedAt.DeepCopyInto(&out.CapturedAt)
+	return &out
+}

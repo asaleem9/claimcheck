@@ -77,6 +77,9 @@ type Report struct {
 
 type Options struct {
 	Features structured.Features
+	// Hypothetical marks a what-if run, where the pod's real status says
+	// nothing about the changed cluster.
+	Hypothetical bool
 }
 
 // Pod explains why a pod's ResourceClaims can or can't be allocated.
@@ -213,7 +216,7 @@ func run(ctx context.Context, snap *snapshot.Snapshot, rep *Report, pod *corev1.
 	case len(rep.FitNodes) > 0:
 		rep.Status = Fits
 		rep.Summary = fmt.Sprintf("The claims can be allocated on %d of %s.", len(rep.FitNodes), plural(eligible, "eligible node"))
-		if pod != nil && pod.Status.Phase == corev1.PodPending {
+		if pod != nil && pod.Status.Phase == corev1.PodPending && !opts.Hypothetical {
 			rep.Notes = append(rep.Notes, "the pod is Pending even though DRA would fit; check other scheduling constraints or whether the scheduler has retried since the cluster changed")
 		}
 	case eligible == 0:
