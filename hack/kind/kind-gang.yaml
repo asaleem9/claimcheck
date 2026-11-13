@@ -1,0 +1,21 @@
+# kind cluster for gang-scheduling tests: the Workload/PodGroup API is beta in
+# Kubernetes v1.37 but not served or enabled by default.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+featureGates:
+  GenericWorkload: true
+  DRAWorkloadResourceClaims: true
+runtimeConfig:
+  scheduling.k8s.io/v1beta1: "true"
+containerdConfigPatches:
+- |-
+  [plugins."io.containerd.grpc.v1.cri"]
+    enable_cdi = true
+nodes:
+- role: control-plane
+- role: worker
+  labels:
+    pool: general
+- role: worker
+  labels:
+    pool: training

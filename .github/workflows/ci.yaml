@@ -47,3 +47,21 @@ jobs:
         run: GPU_PARTITIONS=4 hack/kind/up.sh
       - name: End-to-end tests against kube-scheduler (partitioned GPUs)
         run: go test -tags e2e ./test/e2e -v -count=1 -run TestPartitionScenarios
+
+  e2e-gang:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: azure/setup-helm@v4
+      - name: Install kind (v1.37 node images need kind >= v0.33)
+        run: |
+          go install sigs.k8s.io/kind@v0.33.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Create cluster with the PodGroup API and mock GPUs
+        run: KIND_CONFIG=hack/kind/kind-gang.yaml hack/kind/up.sh
+      - name: Gang-scheduling tests against kube-scheduler
+        run: go test -tags e2e ./test/e2e -v -count=1 -run TestGangScenarios

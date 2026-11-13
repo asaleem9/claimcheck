@@ -10,6 +10,9 @@ DRIVER_VERSION="${DRIVER_VERSION:-v0.5.0}"
 # full device, sharing memory and compute counters.
 GPU_PARTITIONS="${GPU_PARTITIONS:-0}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# KIND_CONFIG picks the cluster layout, e.g. hack/kind/kind-gang.yaml for the
+# PodGroup API.
+KIND_CONFIG="${KIND_CONFIG:-${HERE}/kind.yaml}"
 CACHE="${HERE}/.cache"
 
 # Use an installed helm if there is one (type -P ignores this function),
@@ -24,7 +27,7 @@ helm() {
 
 if ! kind get clusters | grep -qx "${CLUSTER}"; then
   kind create cluster --name "${CLUSTER}" --image "kindest/node:${K8S_VERSION}" \
-    --config "${HERE}/kind.yaml" --wait 2m
+    --config "${KIND_CONFIG}" --wait 2m
 fi
 kubectl config use-context "kind-${CLUSTER}" >/dev/null
 

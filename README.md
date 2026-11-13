@@ -194,6 +194,7 @@ make lint
 make e2e-up     # kind on Kubernetes v1.37 + dra-example-driver (8 mock GPUs per node, no hardware)
 make e2e        # make kube-scheduler reject real pods, assert claimcheck says why
 make e2e-partitions  # the same with each mock GPU split into partitions
+make e2e-gang        # gang-scheduled PodGroups, on a cluster serving that beta API
 make e2e-down
 ```
 
@@ -209,7 +210,7 @@ Each scenario in `testdata/scenarios/` has a `snapshot.yaml` and its expected `e
 - [x] CEL-derived attributes, list-typed attributes and device compatibility groups (alpha in v1.37)
 - [x] Extended resources backed by DRA (`example.com/gpu: 1` in a pod's resources)
 - [x] Partitioned GPUs in the end-to-end suite (`make e2e-partitions`)
-- [ ] Gang scheduling in the end-to-end suite
+- [x] Gang scheduling in the end-to-end suite (`make e2e-gang`)
 
 ## License
 

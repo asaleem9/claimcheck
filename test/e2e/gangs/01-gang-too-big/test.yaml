@@ -1,0 +1,124 @@
+# target: podgroup/train-gang
+# namespace: cc-gang
+# expect-status: Blocked
+# expect-reason: Only 4 of 5 members can get their devices at the same time
+# Five members need 4 GPUs each; the two workers have 8 each, so only four
+# fit and the gang (minCount 5) can't start.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cc-gang
+---
+apiVersion: scheduling.k8s.io/v1beta1
+kind: PodGroup
+metadata:
+  namespace: cc-gang
+  name: train-gang
+spec:
+  schedulingPolicy:
+    gang:
+      minCount: 5
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  namespace: cc-gang
+  name: four-gpus
+spec:
+  spec:
+    devices:
+      requests:
+      - name: gpus
+        exactly:
+          deviceClassName: gpu.example.com
+          count: 4
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: cc-gang
+  name: train-0
+spec:
+  schedulingGroup:
+    podGroupName: train-gang
+  containers:
+  - name: train
+    image: registry.k8s.io/pause:3.10
+    resources:
+      claims:
+      - name: gpus
+  resourceClaims:
+  - name: gpus
+    resourceClaimTemplateName: four-gpus
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: cc-gang
+  name: train-1
+spec:
+  schedulingGroup:
+    podGroupName: train-gang
+  containers:
+  - name: train
+    image: registry.k8s.io/pause:3.10
+    resources:
+      claims:
+      - name: gpus
+  resourceClaims:
+  - name: gpus
+    resourceClaimTemplateName: four-gpus
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: cc-gang
+  name: train-2
+spec:
+  schedulingGroup:
+    podGroupName: train-gang
+  containers:
+  - name: train
+    image: registry.k8s.io/pause:3.10
+    resources:
+      claims:
+      - name: gpus
+  resourceClaims:
+  - name: gpus
+    resourceClaimTemplateName: four-gpus
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: cc-gang
+  name: train-3
+spec:
+  schedulingGroup:
+    podGroupName: train-gang
+  containers:
+  - name: train
+    image: registry.k8s.io/pause:3.10
+    resources:
+      claims:
+      - name: gpus
+  resourceClaims:
+  - name: gpus
+    resourceClaimTemplateName: four-gpus
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: cc-gang
+  name: train-4
+spec:
+  schedulingGroup:
+    podGroupName: train-gang
+  containers:
+  - name: train
+    image: registry.k8s.io/pause:3.10
+    resources:
+      claims:
+      - name: gpus
+  resourceClaims:
+  - name: gpus
+    resourceClaimTemplateName: four-gpus

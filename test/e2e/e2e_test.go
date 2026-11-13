@@ -54,6 +54,16 @@ func TestPartitionScenarios(t *testing.T) {
 	run(t, cs, "partitions")
 }
 
+// TestGangScenarios runs against a cluster serving the PodGroup API
+// (KIND_CONFIG=hack/kind/kind-gang.yaml hack/kind/up.sh).
+func TestGangScenarios(t *testing.T) {
+	cs := client(t)
+	if _, err := cs.SchedulingV1beta1().PodGroups("default").List(context.Background(), metav1.ListOptions{Limit: 1}); err != nil {
+		t.Skipf("PodGroup API not served (%v); create the cluster with KIND_CONFIG=hack/kind/kind-gang.yaml", err)
+	}
+	run(t, cs, "gangs")
+}
+
 func client(t *testing.T) kubernetes.Interface {
 	t.Helper()
 	cfg, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
@@ -99,8 +109,11 @@ func run(t *testing.T, cs kubernetes.Interface, set string) {
 			kubectl(t, "apply", "-f", filepath.Join(dir, "test.yaml"))
 			t.Cleanup(func() { kubectlQuiet("delete", "-f", filepath.Join(dir, "test.yaml"), "--ignore-not-found", "--wait") })
 
-			if h.kind == "pod" {
+			switch h.kind {
+			case "pod":
 				waitUnschedulable(ctx, t, cs, h.namespace, h.name)
+			case "podgroup":
+				waitGroupPending(ctx, t, cs, h.namespace)
 			}
 
 			snap, err := snapshot.FromCluster(ctx, cs, "e2e")
@@ -108,6 +121,21 @@ func run(t *testing.T, cs kubernetes.Interface, set string) {
 				t.Fatal(err)
 			}
 			opts := explain.Options{Features: features.Default()}
+			if h.kind == "podgroup" {
+				gang, err := explain.PodGroup(ctx, snap, h.namespace, h.name, opts)
+				if err != nil {
+					t.Fatal(err)
+				}
+				out, _ := json.MarshalIndent(gang, "", "  ")
+				if gang.Status != h.status {
+					t.Fatalf("status = %s, want %s\n%s", gang.Status, h.status, out)
+				}
+				if h.reason != "" && !strings.Contains(gang.Summary+"\n"+string(out), h.reason) {
+					t.Errorf("report does not mention %q:\n%s", h.reason, out)
+				}
+				t.Logf("%s: %s", gang.Status, gang.Summary)
+				return
+			}
 			var rep *explain.Report
 			if h.kind == "pod" {
 				rep, err = explain.Pod(ctx, snap, h.namespace, h.name, opts)
@@ -221,6 +249,34 @@ func waitUnschedulable(ctx context.Context, t *testing.T, cs kubernetes.Interfac
 			t.Fatalf("pod %s was scheduled to %s, but the scenario expects it to be rejected", name, p.Spec.NodeName)
 		}
 		return false
+	})
+}
+
+// waitGroupPending waits until the scheduler has tried and rejected every
+// member pod of the namespace's gang.
+func waitGroupPending(ctx context.Context, t *testing.T, cs kubernetes.Interface, ns string) {
+	t.Helper()
+	poll(ctx, t, "gang members unschedulable", func() bool {
+		pods, err := cs.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{})
+		if err != nil || len(pods.Items) == 0 {
+			return false
+		}
+		for _, p := range pods.Items {
+			if p.Spec.NodeName != "" {
+				t.Fatalf("member %s was scheduled to %s, but the gang should not fit", p.Name, p.Spec.NodeName)
+			}
+			pending := false
+			for _, c := range p.Status.Conditions {
+				if c.Type == corev1.PodScheduled && c.Status == corev1.ConditionFalse {
+					pending = true
+				}
+			}
+			if !pending {
+				return false
+			}
+		}
+		t.Logf("scheduler: %s", pods.Items[0].Status.Conditions[0].Message)
+		return true
 	})
 }
 
