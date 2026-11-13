@@ -1,0 +1,34 @@
+
+pod ml/train  (Pending)
+
+ BLOCKED   No eligible node can allocate the claims (1 node checked).
+
+Claims
+  full-gpu   pending   
+
+Nodes (allocator verdict · why)
+  worker   ✗   gpu 0/1 usable · 12 fail selector #0, 2 counters used up
+
+Why
+  request "gpu" in ml/full-gpu: needs 1, 0 usable (14 devices considered).
+    selector #0 rejects 12 of 14 devices: device.attributes["gpu.example.com"].profile == "full"
+        values seen: profile=quarter ×8 · profile=half ×4
+    2 of 14 devices match but their physical device has no capacity left: needs memory=80Gi of counter set gpu-0, 40Gi left; used by gpu-0-half-0 ×1 · needs memory=80Gi of counter set gpu-1, 60Gi left; used by gpu-1-quarter-2 ×1
+
+Devices on worker
+  REQUEST   DEVICE                   RESULT               DETAIL
+  gpu       worker/gpu-0-full        ✗ counters used up   needs memory=80Gi of counter set gpu-0, 40Gi left; used by gpu-0-half-0
+  gpu       worker/gpu-0-half-0      ✗ fail selector #0   profile=half
+  gpu       worker/gpu-0-half-1      ✗ fail selector #0   profile=half
+  gpu       worker/gpu-0-quarter-0   ✗ fail selector #0   profile=quarter
+  gpu       worker/gpu-0-quarter-1   ✗ fail selector #0   profile=quarter
+  gpu       worker/gpu-0-quarter-2   ✗ fail selector #0   profile=quarter
+  gpu       worker/gpu-0-quarter-3   ✗ fail selector #0   profile=quarter
+  gpu       worker/gpu-1-full        ✗ counters used up   needs memory=80Gi of counter set gpu-1, 60Gi left; used by gpu-1-quarter-2
+  gpu       worker/gpu-1-half-0      ✗ fail selector #0   profile=half
+  gpu       worker/gpu-1-half-1      ✗ fail selector #0   profile=half
+  gpu       worker/gpu-1-quarter-0   ✗ fail selector #0   profile=quarter
+  gpu       worker/gpu-1-quarter-1   ✗ fail selector #0   profile=quarter
+  gpu       worker/gpu-1-quarter-2   ✗ fail selector #0   profile=quarter
+  gpu       worker/gpu-1-quarter-3   ✗ fail selector #0   profile=quarter
+

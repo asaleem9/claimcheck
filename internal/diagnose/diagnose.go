@@ -16,6 +16,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	resourceapi "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/dynamic-resource-allocation/cel"
 	"k8s.io/dynamic-resource-allocation/resourceclaim"
@@ -37,6 +38,12 @@ const (
 	InUse           Reason = "InUse"
 	Tainted         Reason = "Tainted"
 	FeatureDisabled Reason = "FeatureDisabled"
+	// CountersExhausted: a partition's shared counters (e.g. memory slices
+	// of its physical GPU) are used up by other allocated partitions.
+	CountersExhausted Reason = "CountersExhausted"
+	// PoolIncomplete: the device's pool doesn't have all its ResourceSlices
+	// yet, so the allocator skips the whole pool.
+	PoolIncomplete Reason = "PoolIncomplete"
 )
 
 // Device is one device's outcome for one request.
@@ -97,6 +104,9 @@ type Node struct {
 	// ConstraintFailure is set when the requests could get distinct devices,
 	// but not ones that satisfy a matchAttribute/distinctAttribute constraint.
 	ConstraintFailure string `json:"constraintFailure,omitempty"`
+	// CounterConflict is set when partitions that fit one at a time draw on
+	// the same shared counters and don't fit together.
+	CounterConflict string `json:"counterConflict,omitempty"`
 	// Unanalyzed lists claim features the diagnosis doesn't model yet, which
 	// is the likely cause if it disagrees with the verdict.
 	Unanalyzed []string `json:"unanalyzed,omitempty"`
@@ -112,7 +122,10 @@ type Diagnoser struct {
 	Taints    map[structured.DeviceID][]snapshot.TaintSource
 	CEL       *cel.Cache
 
-	latestGen map[string]int64
+	latestGen    map[string]int64
+	counterCache *counterState
+	incomplete   map[string]string
+	compatGroups bool
 }
 
 type candidate struct {
@@ -120,6 +133,8 @@ type candidate struct {
 	index int
 	// nodeOK is false for per-device node selection that excludes this node.
 	nodeOK bool
+	// incomplete explains why the device's pool is incomplete, if it is.
+	incomplete string
 }
 
 // Diagnose explains the given claims on one node. All claims are considered
@@ -136,8 +151,12 @@ func (d *Diagnoser) Diagnose(ctx context.Context, node *corev1.Node, claims []*r
 		byID[structured.MakeDeviceID(c.slice.Spec.Driver, c.slice.Spec.Pool.Name, dev.Name)] = dev
 	}
 	var cons []constraintSpec
+	if d.compatGroups {
+		out.Unanalyzed = append(out.Unanalyzed, "device compatibility groups (DRADeviceCompatibilityGroups)")
+	}
 	for _, claim := range claims {
 		name := claim.Namespace + "/" + claim.Name
+		claimDevices := 0
 		for _, req := range claim.Spec.Devices.Requests {
 			var r Request
 			switch {
@@ -158,6 +177,25 @@ func (d *Diagnoser) Diagnose(ctx context.Context, node *corev1.Node, claims []*r
 				}
 			default:
 				r = Request{Claim: name, Name: req.Name, Problem: "request has neither exactly nor firstAvailable"}
+			}
+			// Like the allocator, count the fewest devices each request can
+			// take; a claim may hold at most AllocationResultsMaxSize.
+			if !r.Fatal {
+				minDevices := r.Needed
+				if len(r.Alternatives) > 0 {
+					minDevices = -1
+					for _, a := range r.Alternatives {
+						if minDevices < 0 || a.Needed < minDevices {
+							minDevices = a.Needed
+						}
+					}
+				}
+				if claimDevices+minDevices > resourceapi.AllocationResultsMaxSize {
+					r.Satisfied, r.Fatal = false, true
+					r.Problem = fmt.Sprintf("adding %d devices exceeds the limit of %d devices per claim, with %d already needed by earlier requests",
+						minDevices, resourceapi.AllocationResultsMaxSize, claimDevices)
+				}
+				claimDevices += max(minDevices, 0)
 			}
 			if !r.Satisfied {
 				out.Fits = false
@@ -184,15 +222,34 @@ func (d *Diagnoser) Diagnose(ctx context.Context, node *corev1.Node, claims []*r
 	}
 	if out.Fits {
 		var unknown bool
-		out.Contention, out.ConstraintFailure, unknown = resolve(out.Requests, cons, lookupValue(byID))
-		out.Fits = out.Contention == "" && out.ConstraintFailure == ""
+		ctr := &solverCounters{left: d.counters().left, byID: byID}
+		out.Contention, out.CounterConflict, out.ConstraintFailure, unknown = resolve(out.Requests, cons, lookupValue(byID), ctr)
+		out.Fits = out.Contention == "" && out.CounterConflict == "" && out.ConstraintFailure == ""
 		if unknown {
 			out.Fits = false
-			out.ConstraintFailure = ""
+			out.ConstraintFailure, out.CounterConflict = "", ""
 			out.Unanalyzed = append(out.Unanalyzed, "constraint search exceeded its budget or met list-typed attributes")
 		}
 	}
 	return out, nil
+}
+
+// solverCounters gives the solver each device's counter consumption.
+type solverCounters struct {
+	left map[counterKey]resource.Quantity
+	byID map[structured.DeviceID]*resourceapi.Device
+}
+
+func newSolver(reqs []Request, cons []constraintSpec, value valueFunc, ctr *solverCounters) *solver {
+	s := &solver{slots: buildSlots(reqs), cons: cons, value: value, budget: backtrackBudget, left: ctr.left}
+	s.uses = func(id structured.DeviceID) []counterUse {
+		dev := ctr.byID[id]
+		if dev == nil {
+			return nil
+		}
+		return uses(id.Driver.String(), id.Pool.String(), dev)
+	}
+	return s
 }
 
 // unmodeled returns why a constraint can't be analyzed, or "".
@@ -230,7 +287,7 @@ const maxCombinations = 4096
 // backtracks to later ones. It sets Chosen on each request. On failure it
 // explains the preferred combination: device contention or a constraint.
 // unknown means the search was cut short and the answer can't be trusted.
-func resolve(reqs []Request, cons []constraintSpec, value valueFunc) (contention, constraint string, unknown bool) {
+func resolve(reqs []Request, cons []constraintSpec, value valueFunc, ctr *solverCounters) (contention, counters, constraint string, unknown bool) {
 	var choices [][]int // per request: satisfiable alternative indices
 	var multi []int     // indices of requests with alternatives
 	combos := 1
@@ -249,17 +306,17 @@ func resolve(reqs []Request, cons []constraintSpec, value valueFunc) (contention
 		combos *= len(sat)
 	}
 	if combos > maxCombinations {
-		return "", "", true
+		return "", "", "", true
 	}
 	pos := make([]int, len(multi))
 	for {
 		for k, i := range multi {
 			reqs[i].Chosen = choices[k][pos[k]]
 		}
-		s := &solver{slots: buildSlots(reqs), cons: cons, value: value, budget: backtrackBudget}
+		s := newSolver(reqs, cons, value, ctr)
 		ok, unk := s.solve(cons)
 		if ok {
-			return "", "", false
+			return "", "", "", false
 		}
 		unknown = unknown || unk
 		// Advance in lexicographic order: last request varies fastest, so
@@ -281,24 +338,18 @@ func resolve(reqs []Request, cons []constraintSpec, value valueFunc) (contention
 		reqs[i].Chosen = choices[k][0]
 	}
 	if unknown {
-		return "", "", true
+		return "", "", "", true
 	}
-	s := &solver{slots: buildSlots(reqs), cons: cons, value: value, budget: backtrackBudget}
-	contention, constraint = s.explain()
-	return contention, constraint, false
+	s := newSolver(reqs, cons, value, ctr)
+	contention, counters, constraint = s.explain()
+	return contention, counters, constraint, false
 }
 
 // devicesFor returns the devices the allocator would consider for node, the
 // same way GatherPools selects slices: current pool generation only,
 // node-local or shared slices that match the node.
 func (d *Diagnoser) devicesFor(node *corev1.Node) ([]candidate, error) {
-	if d.latestGen == nil {
-		d.latestGen = map[string]int64{}
-		for _, s := range d.Slices {
-			k := s.Spec.Driver + "/" + s.Spec.Pool.Name
-			d.latestGen[k] = max(d.latestGen[k], s.Spec.Pool.Generation)
-		}
-	}
+	d.generations()
 	var out []candidate
 	for _, s := range d.Slices {
 		if s.Spec.Pool.Generation < d.latestGen[s.Spec.Driver+"/"+s.Spec.Pool.Name] {
@@ -308,6 +359,16 @@ func (d *Diagnoser) devicesFor(node *corev1.Node) ([]candidate, error) {
 		if !d.Features.PartitionableDevices && (s.Spec.PerDeviceNodeSelection != nil || len(s.Spec.SharedCounters) > 0) {
 			continue
 		}
+		if usesCompatibilityGroups(s) {
+			if !d.Features.CompatibilityGroups {
+				continue // the allocator ignores the slice, like GatherPools
+			}
+			d.compatGroups = true
+		}
+		if d.Features.PartitionableDevices && len(s.Spec.SharedCounters) > 0 {
+			continue // a counter-set slice; the allocator ignores any devices in it
+		}
+		incomplete := d.poolIncomplete()[poolKey(s.Spec.Driver, s.Spec.Pool.Name)]
 		nodeName, allNodes := ptr.Deref(s.Spec.NodeName, ""), ptr.Deref(s.Spec.AllNodes, false)
 		switch {
 		case nodeName != "" || allNodes || s.Spec.NodeSelector != nil:
@@ -319,7 +380,7 @@ func (d *Diagnoser) devicesFor(node *corev1.Node) ([]candidate, error) {
 				continue
 			}
 			for i := range s.Spec.Devices {
-				out = append(out, candidate{slice: s, index: i, nodeOK: true})
+				out = append(out, candidate{slice: s, index: i, nodeOK: true, incomplete: incomplete})
 			}
 		case perDevice:
 			for i, dev := range s.Spec.Devices {
@@ -327,11 +388,58 @@ func (d *Diagnoser) devicesFor(node *corev1.Node) ([]candidate, error) {
 				if err != nil {
 					return nil, fmt.Errorf("slice %s device %s: %w", s.Name, dev.Name, err)
 				}
-				out = append(out, candidate{slice: s, index: i, nodeOK: ok})
+				out = append(out, candidate{slice: s, index: i, nodeOK: ok, incomplete: incomplete})
 			}
 		}
 	}
 	return out, nil
+}
+
+// poolIncomplete maps pools that don't have all their ResourceSlices to an
+// explanation, counting slices the way GatherPools does.
+func (d *Diagnoser) poolIncomplete() map[string]string {
+	if d.incomplete != nil {
+		return d.incomplete
+	}
+	d.incomplete = map[string]string{}
+	have := map[string]int64{}
+	want := map[string]int64{}
+	for _, s := range d.current() {
+		if !d.Features.CompatibilityGroups && usesCompatibilityGroups(s) {
+			continue
+		}
+		k := poolKey(s.Spec.Driver, s.Spec.Pool.Name)
+		have[k]++
+		want[k] = s.Spec.Pool.ResourceSliceCount
+	}
+	for k, n := range have {
+		if n != want[k] {
+			d.incomplete[k] = fmt.Sprintf("pool %s has %d of %d ResourceSlices; the driver may still be publishing", k, n, want[k])
+		}
+	}
+	return d.incomplete
+}
+
+func usesCompatibilityGroups(s *resourceapi.ResourceSlice) bool {
+	for _, dev := range s.Spec.Devices {
+		for _, cc := range dev.ConsumesCounters {
+			if len(cc.CompatibilityGroups) > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (d *Diagnoser) generations() {
+	if d.latestGen != nil {
+		return
+	}
+	d.latestGen = map[string]int64{}
+	for _, s := range d.Slices {
+		k := s.Spec.Driver + "/" + s.Spec.Pool.Name
+		d.latestGen[k] = max(d.latestGen[k], s.Spec.Pool.Generation)
+	}
 }
 
 // accessor abstracts over ExactDeviceRequest and DeviceSubRequest.
@@ -373,10 +481,18 @@ func (d *Diagnoser) request(ctx context.Context, claim, name string, a accessor,
 		r.ClassSelectors = append(r.ClassSelectors, s.CEL.Expression)
 	}
 
+	if r.Mode == resourceapi.DeviceAllocationModeAll {
+		for _, c := range devices {
+			if c.incomplete != "" {
+				r.Problem, r.Fatal = "asks for all devices, but "+c.incomplete, true
+				return r
+			}
+		}
+	}
 	selectable := 0
 	for _, c := range devices {
 		dev := d.device(ctx, c, class, a)
-		if dev.Reason == Available || dev.Reason == InUse || dev.Reason == Tainted || dev.Reason == FeatureDisabled {
+		if dev.Reason == Available || dev.Reason == InUse || dev.Reason == Tainted || dev.Reason == FeatureDisabled || dev.Reason == CountersExhausted {
 			selectable++
 		}
 		if dev.Reason == Available {
@@ -410,6 +526,10 @@ func (d *Diagnoser) device(ctx context.Context, c candidate, class *resourceapi.
 	out := Device{Driver: c.slice.Spec.Driver, Pool: c.slice.Spec.Pool.Name, Name: dev.Name}
 	id := out.ID()
 
+	if c.incomplete != "" {
+		out.Reason, out.Detail = PoolIncomplete, c.incomplete
+		return out
+	}
 	if !d.Features.DeviceBindingAndStatus && len(dev.BindingConditions) > 0 {
 		out.Reason, out.Detail = FeatureDisabled, "device has binding conditions but DRADeviceBindingConditions is disabled"
 		return out
@@ -444,6 +564,12 @@ func (d *Diagnoser) device(ctx context.Context, c candidate, class *resourceapi.
 	if len(dev.ConsumesCounters) > 0 && !d.Features.PartitionableDevices {
 		out.Reason, out.Detail = FeatureDisabled, "device consumes counters but DRAPartitionableDevices is disabled"
 		return out
+	}
+	if len(dev.ConsumesCounters) > 0 {
+		if short := d.counterShortfall(out.Driver, out.Pool, dev); short != "" {
+			out.Reason, out.Detail = CountersExhausted, short
+			return out
+		}
 	}
 	if d.Features.DeviceTaints {
 		for _, ts := range d.Taints[id] {

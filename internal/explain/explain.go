@@ -272,7 +272,7 @@ func IsConstraintError(err string) bool {
 // hasReason reports whether the diagnosis found a concrete reason the
 // claims don't fit, as opposed to giving up on an unmodeled feature.
 func hasReason(n diagnose.Node) bool {
-	if n.Contention != "" || n.ConstraintFailure != "" {
+	if n.Contention != "" || n.ConstraintFailure != "" || n.CounterConflict != "" {
 		return true
 	}
 	for _, r := range n.Requests {

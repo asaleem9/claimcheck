@@ -182,6 +182,9 @@ func nodeWhy(n explain.NodeReport) string {
 		}
 		parts = append(parts, requestWhy(r))
 	}
+	if n.Diagnosis.CounterConflict != "" {
+		parts = append(parts, "partitions exceed their shared counters together")
+	}
 	if c := n.Diagnosis.ConstraintFailure; c != "" {
 		if f := strings.Fields(c); len(f) >= 2 && strings.HasSuffix(f[0], "Attribute") {
 			parts = append(parts, f[0]+" "+f[1]+" can't be satisfied")
@@ -243,6 +246,10 @@ func reasonLabel(d diagnose.Device) string {
 		return "on other nodes"
 	case diagnose.FeatureDisabled:
 		return "need disabled feature"
+	case diagnose.CountersExhausted:
+		return "counters used up"
+	case diagnose.PoolIncomplete:
+		return "pool incomplete"
 	}
 	return string(d.Reason)
 }

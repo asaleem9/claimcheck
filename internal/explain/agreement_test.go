@@ -34,6 +34,8 @@ func TestAgreement(t *testing.T) {
 		`device.capacity["gpu.example.com"].memory.compareTo(quantity("40Gi")) >= 0`,
 		`device.capacity["gpu.example.com"].memory.compareTo(quantity("80Gi")) < 0`,
 		`true`,
+		`device.attributes["gpu.example.com"].?profile.orValue("") != "full"`,
+		`device.capacity["gpu.example.com"].memory.compareTo(quantity("40Gi")) <= 0`,
 	}
 	taint := resourceapi.DeviceTaint{Key: "example.com/unhealthy", Effect: resourceapi.DeviceTaintEffectNoSchedule}
 	toleration := resourceapi.DeviceToleration{Key: "example.com/unhealthy", Operator: resourceapi.DeviceTolerationOpExists}
@@ -53,6 +55,35 @@ func TestAgreement(t *testing.T) {
 		for n := range nodes {
 			node := fmt.Sprintf("node-%d", n)
 			b.Node(node, nil)
+			if r.IntN(3) == 0 {
+				// MIG-style partitions sharing a memory counter per GPU.
+				phys := map[string]struct {
+					Memory     string
+					Partitions []tu.Partition
+				}{}
+				var all []string
+				for g := range 1 + r.IntN(2) {
+					name := fmt.Sprintf("gpu-%d", g)
+					var ps []tu.Partition
+					for i, prof := range []string{"full", "half", "half", "quarter", "quarter", "quarter", "quarter"} {
+						mem := map[string]string{"full": "80Gi", "half": "40Gi", "quarter": "20Gi"}[prof]
+						p := tu.Partition{Name: fmt.Sprintf("%s-p%d", name, i), Profile: prof, Memory: mem}
+						ps = append(ps, p)
+						all = append(all, p.Name)
+					}
+					phys[name] = struct {
+						Memory     string
+						Partitions []tu.Partition
+					}{"80Gi", ps}
+				}
+				b.PartitionedSlice(node, phys)
+				for _, p := range all {
+					if r.IntN(5) == 0 {
+						b.Allocated("other", fmt.Sprintf("holder-%s-%s", node, p), node, p)
+					}
+				}
+				continue
+			}
 			var gpus []tu.GPU
 			for d := range r.IntN(6) {
 				g := tu.GPU{Name: fmt.Sprintf("gpu-%d", d), Model: models[r.IntN(len(models))], Memory: mems[r.IntN(len(mems))]}

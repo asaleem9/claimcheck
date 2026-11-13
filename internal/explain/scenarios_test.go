@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -175,6 +176,62 @@ var scenarios = []scenario{
 		features: "DRADerivedAttributes=true",
 		status:   explain.Unexplained,
 	},
+	{
+		name: "partition-exhausted",
+		build: func() *tu.B {
+			return partitionedNode().
+				Allocated("ml", "inference", "worker", "gpu-0-half-0").
+				Allocated("ml", "notebook", "worker", "gpu-1-quarter-2").
+				Claim("ml", "full-gpu", tu.Req{Name: "gpu", Selectors: []string{`device.attributes["gpu.example.com"].profile == "full"`}}).
+				Pod("ml", "train", nil, "full-gpu")
+		},
+		status: explain.Blocked,
+	},
+	{
+		name: "partition-joint",
+		build: func() *tu.B {
+			return partitionedNode().
+				Allocated("ml", "notebook", "worker", "gpu-0-quarter-0").
+				Allocated("ml", "inference", "worker", "gpu-1-full").
+				Claim("ml", "two-halves", tu.Req{Name: "halves", Count: 2, Selectors: []string{`device.attributes["gpu.example.com"].profile == "half"`}}).
+				MatchAttribute("gpu.example.com/parent").
+				Pod("ml", "train", nil, "two-halves")
+		},
+		status: explain.Blocked,
+	},
+	{
+		name: "partition-fits",
+		build: func() *tu.B {
+			return partitionedNode().
+				Allocated("ml", "notebook", "worker", "gpu-0-quarter-0").
+				Claim("ml", "two-halves", tu.Req{Name: "halves", Count: 2, Selectors: []string{`device.attributes["gpu.example.com"].profile == "half"`}}).
+				MatchAttribute("gpu.example.com/parent").
+				Pod("ml", "train", nil, "two-halves")
+		},
+		status: explain.Fits,
+	},
+}
+
+// partitionedNode has one worker with two 80Gi GPUs, each published as one
+// full partition, two halves and four quarters sharing a memory counter.
+func partitionedNode() *tu.B {
+	parts := func(phys string) []tu.Partition {
+		ps := []tu.Partition{{Name: phys + "-full", Profile: "full", Memory: "80Gi"}}
+		for i := range 2 {
+			ps = append(ps, tu.Partition{Name: fmt.Sprintf("%s-half-%d", phys, i), Profile: "half", Memory: "40Gi"})
+		}
+		for i := range 4 {
+			ps = append(ps, tu.Partition{Name: fmt.Sprintf("%s-quarter-%d", phys, i), Profile: "quarter", Memory: "20Gi"})
+		}
+		return ps
+	}
+	return tu.New().Node("worker", nil).GPUClass().PartitionedSlice("worker", map[string]struct {
+		Memory     string
+		Partitions []tu.Partition
+	}{
+		"gpu-0": {Memory: "80Gi", Partitions: parts("gpu-0")},
+		"gpu-1": {Memory: "80Gi", Partitions: parts("gpu-1")},
+	})
 }
 
 // nvlinkNode has one worker with two NVLink domains: gpu-0 alone in

@@ -1,0 +1,31 @@
+
+pod ml/train  (Pending)
+
+ FITS   The claims can be allocated on 1 of 1 eligible node.
+
+Claims
+  two-halves   pending   
+
+Nodes (allocator verdict · why)
+  worker   ✓ fits   halves→gpu-1-half-0, halves→gpu-1-half-1
+
+Notes
+  • the pod is Pending even though DRA would fit; check other scheduling constraints or whether the scheduler has retried since the cluster changed
+
+Devices on worker
+  REQUEST   DEVICE                   RESULT               DETAIL
+  halves    worker/gpu-0-full        ✗ fail selector #0   profile=full
+  halves    worker/gpu-0-half-0      ✓ usable             
+  halves    worker/gpu-0-half-1      ✓ usable             
+  halves    worker/gpu-0-quarter-0   ✗ fail selector #0   profile=quarter
+  halves    worker/gpu-0-quarter-1   ✗ fail selector #0   profile=quarter
+  halves    worker/gpu-0-quarter-2   ✗ fail selector #0   profile=quarter
+  halves    worker/gpu-0-quarter-3   ✗ fail selector #0   profile=quarter
+  halves    worker/gpu-1-full        ✗ fail selector #0   profile=full
+  halves    worker/gpu-1-half-0      ✓ usable             
+  halves    worker/gpu-1-half-1      ✓ usable             
+  halves    worker/gpu-1-quarter-0   ✗ fail selector #0   profile=quarter
+  halves    worker/gpu-1-quarter-1   ✗ fail selector #0   profile=quarter
+  halves    worker/gpu-1-quarter-2   ✗ fail selector #0   profile=quarter
+  halves    worker/gpu-1-quarter-3   ✗ fail selector #0   profile=quarter
+

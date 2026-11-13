@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	resourceapi "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/dynamic-resource-allocation/structured"
 )
@@ -16,6 +17,9 @@ import (
 type slot struct {
 	claim, request string
 	options        []structured.DeviceID
+	// interchangeable slots belong to the same ExactCount request and have
+	// identical options, so their order doesn't matter.
+	interchangeable bool
 }
 
 // constraintSpec is a claim's matchAttribute or distinctAttribute constraint.
@@ -100,6 +104,25 @@ type solver struct {
 	cons   []constraintSpec
 	value  valueFunc
 	budget int
+	// uses and left model shared counters of partitionable devices.
+	uses func(structured.DeviceID) []counterUse
+	left map[counterKey]resource.Quantity
+}
+
+// countersMatter reports whether any option consumes shared counters, in
+// which case devices can't be picked independently of each other.
+func (s *solver) countersMatter(slots []slot) bool {
+	if s.uses == nil {
+		return false
+	}
+	for _, sl := range slots {
+		for _, id := range sl.options {
+			if len(s.uses(id)) > 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 const (
@@ -156,11 +179,11 @@ func (s *solver) solve(cons []constraintSpec) (ok, unknown bool) {
 		if restricted == nil {
 			return false, true
 		}
-		if len(distinct) == 0 {
+		if len(distinct) == 0 && !s.countersMatter(restricted) {
 			if matchAll(restricted) {
 				return true, false
 			}
-		} else {
+		} else if matchAll(restricted) {
 			found, exhausted := s.backtrack(restricted, distinct)
 			if found {
 				return true, false
@@ -197,7 +220,7 @@ func (s *solver) anyApplies(c constraintSpec) bool {
 func (s *solver) restrict(match []constraintSpec, values [][]string, pos []int, distinct []constraintSpec) []slot {
 	out := make([]slot, len(s.slots))
 	for i, sl := range s.slots {
-		out[i] = slot{claim: sl.claim, request: sl.request}
+		out[i] = slot{claim: sl.claim, request: sl.request, interchangeable: sl.interchangeable}
 	options:
 		for _, id := range sl.options {
 			for j, m := range match {
@@ -231,7 +254,9 @@ func (s *solver) restrict(match []constraintSpec, values [][]string, pos []int, 
 }
 
 // backtrack assigns devices slot by slot, most constrained slot first,
-// keeping distinctAttribute values unique per constraint.
+// keeping distinctAttribute values unique per constraint and shared
+// counters non-negative. Slots of the same request are interchangeable, so
+// they take options in increasing order to avoid re-trying permutations.
 func (s *solver) backtrack(slots []slot, distinct []constraintSpec) (found, exhausted bool) {
 	order := make([]int, len(slots))
 	for i := range order {
@@ -243,6 +268,11 @@ func (s *solver) backtrack(slots []slot, distinct []constraintSpec) (found, exha
 	for i := range taken {
 		taken[i] = sets.New[string]()
 	}
+	left := make(map[counterKey]resource.Quantity, len(s.left))
+	for k, v := range s.left {
+		left[k] = v.DeepCopy()
+	}
+	chosen := make([]int, len(order))
 	steps := 0
 	var rec func(n int) bool
 	rec = func(n int) bool {
@@ -250,8 +280,16 @@ func (s *solver) backtrack(slots []slot, distinct []constraintSpec) (found, exha
 			return true
 		}
 		sl := slots[order[n]]
+		start := 0
+		if n > 0 {
+			prev := slots[order[n-1]]
+			if sl.interchangeable && prev.interchangeable && prev.claim == sl.claim && prev.request == sl.request {
+				start = chosen[n-1] + 1
+			}
+		}
 	options:
-		for _, id := range sl.options {
+		for oi := start; oi < len(sl.options); oi++ {
+			id := sl.options[oi]
 			steps++
 			if steps > s.budget {
 				exhausted = true
@@ -271,12 +309,28 @@ func (s *solver) backtrack(slots []slot, distinct []constraintSpec) (found, exha
 				}
 				keys = append(keys, key)
 			}
+			var us []counterUse
+			if s.uses != nil {
+				us = s.uses(id)
+			}
+			for _, u := range us {
+				if l, ok := left[u.key]; ok && l.Cmp(u.qty) < 0 {
+					continue options
+				}
+			}
 			used.Insert(id)
 			for j, key := range keys {
 				if key != "" {
 					taken[j].Insert(key)
 				}
 			}
+			for _, u := range us {
+				if l, ok := left[u.key]; ok {
+					l.Sub(u.qty)
+					left[u.key] = l
+				}
+			}
+			chosen[n] = oi
 			if rec(n + 1) {
 				return true
 			}
@@ -284,6 +338,12 @@ func (s *solver) backtrack(slots []slot, distinct []constraintSpec) (found, exha
 			for j, key := range keys {
 				if key != "" {
 					taken[j].Delete(key)
+				}
+			}
+			for _, u := range us {
+				if l, ok := left[u.key]; ok {
+					l.Add(u.qty)
+					left[u.key] = l
 				}
 			}
 			if exhausted {
@@ -323,23 +383,28 @@ func matchAll(slots []slot) bool {
 
 // explain describes why the slots can't be filled: plain contention for
 // devices, a specific constraint, or constraints that conflict together.
-func (s *solver) explain() (contention, constraint string) {
+func (s *solver) explain() (contention, counters, constraint string) {
 	if !matchAll(s.slots) {
-		return contentionMessage(s.slots), ""
+		return contentionMessage(s.slots), "", ""
+	}
+	if s.countersMatter(s.slots) {
+		if ok, unknown := s.solve(nil); !ok && !unknown {
+			return "", s.counterMessage(), ""
+		}
 	}
 	for _, c := range s.cons {
 		if !s.anyApplies(c) {
 			continue
 		}
 		if ok, unknown := s.solve([]constraintSpec{c}); !ok && !unknown {
-			return "", s.describe(c)
+			return "", "", s.describe(c)
 		}
 	}
 	var kinds []string
 	for _, c := range s.cons {
 		kinds = append(kinds, c.kind()+" "+string(c.attr))
 	}
-	return "", "each constraint can be met on its own, but not all together: " + strings.Join(kinds, ", ")
+	return "", "", "each constraint can be met on its own, but not all together: " + strings.Join(kinds, ", ")
 }
 
 // describe explains one failing constraint with the usable devices grouped
@@ -386,6 +451,48 @@ func (s *solver) describe(c constraintSpec) string {
 	}
 	return fmt.Sprintf("%s %s on %s needs %d devices with %s; usable devices: %s",
 		c.kind(), c.attr, strings.Join(reqs, " and "), need, want, strings.Join(parts, " · "))
+}
+
+// counterMessage explains that the candidate partitions can't all be
+// allocated together because they draw on the same shared counters.
+func (s *solver) counterMessage() string {
+	var reqs []string
+	seen := sets.New[string]()
+	need := map[counterKey][2]resource.Quantity{} // min, max per device
+	for _, sl := range s.slots {
+		if !seen.Has(sl.request) {
+			seen.Insert(sl.request)
+			reqs = append(reqs, strconv.Quote(sl.request))
+		}
+		for _, id := range sl.options {
+			for _, u := range s.uses(id) {
+				mm, ok := need[u.key]
+				if !ok {
+					need[u.key] = [2]resource.Quantity{u.qty, u.qty}
+					continue
+				}
+				if u.qty.Cmp(mm[0]) < 0 {
+					mm[0] = u.qty
+				}
+				if u.qty.Cmp(mm[1]) > 0 {
+					mm[1] = u.qty
+				}
+				need[u.key] = mm
+			}
+		}
+	}
+	var parts []string
+	for k, mm := range need {
+		per := mm[0].String()
+		if mm[0].Cmp(mm[1]) != 0 {
+			per = mm[0].String() + "–" + mm[1].String()
+		}
+		l := s.left[k]
+		parts = append(parts, fmt.Sprintf("%s: %s left, %s per device", k, l.String(), per))
+	}
+	sort.Strings(parts)
+	return fmt.Sprintf("%s need %d partitions, but together they use more of their shared counters than is left: %s",
+		strings.Join(reqs, " and "), len(s.slots), strings.Join(parts, " · "))
 }
 
 func attrName(a resourceapi.FullyQualifiedName) string {
@@ -435,12 +542,12 @@ func buildSlots(reqs []Request) []slot {
 		}
 		if r.Mode == resourceapi.DeviceAllocationModeAll {
 			for _, id := range usable {
-				slots = append(slots, slot{r.Claim, r.Name, []structured.DeviceID{id}})
+				slots = append(slots, slot{claim: r.Claim, request: r.Name, options: []structured.DeviceID{id}})
 			}
 			continue
 		}
 		for range r.Needed {
-			slots = append(slots, slot{r.Claim, r.Name, usable})
+			slots = append(slots, slot{claim: r.Claim, request: r.Name, options: usable, interchangeable: true})
 		}
 	}
 	return slots

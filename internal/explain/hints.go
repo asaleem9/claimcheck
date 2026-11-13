@@ -79,6 +79,9 @@ func hints(rep *Report) []string {
 		if n.Excluded == "" && IsConstraintError(n.Verdict.Err) && constraintErr == "" {
 			constraintErr = fmt.Sprintf("The allocator stops with an error on %s instead of trying other devices: a device for an allocationMode: All request breaks one of the claim's constraints.\n    All-mode requests take every matching device, so each of them must satisfy the claim's matchAttribute/distinctAttribute constraints.", n.Node)
 		}
+		if n.Excluded == "" && n.Diagnosis.CounterConflict != "" {
+			contention = append(contention, fmt.Sprintf("On %s each partition fits on its own, but not together:\n    %s", n.Node, n.Diagnosis.CounterConflict))
+		}
 		if n.Excluded == "" && n.Diagnosis.ConstraintFailure != "" {
 			contention = append(contention, fmt.Sprintf("On %s the requests can get enough devices, but not ones that satisfy the claim's constraints:\n    %s", n.Node, n.Diagnosis.ConstraintFailure))
 		}
@@ -181,6 +184,10 @@ func requestHints(v *requestView) []string {
 			out = append(out, fmt.Sprintf("  %s match but are already allocated: %s", of, histogram(trimPrefix(b.details, "allocated to "))))
 		case diagnose.Tainted:
 			out = append(out, fmt.Sprintf("  %s match but are tainted: %s\n      add a matching toleration to the request, or remove the taint", of, histogram(b.details)))
+		case diagnose.CountersExhausted:
+			out = append(out, fmt.Sprintf("  %s match but their physical device has no capacity left: %s", of, histogram(b.details)))
+		case diagnose.PoolIncomplete:
+			out = append(out, fmt.Sprintf("  %s are skipped because their pool is incomplete: %s", of, firstKey(b.details)))
 		case diagnose.DeviceNode:
 			out = append(out, fmt.Sprintf("  %s are bound to other nodes by per-device node selection", of))
 		case diagnose.FeatureDisabled:

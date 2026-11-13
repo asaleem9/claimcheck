@@ -1,0 +1,368 @@
+apiVersion: claimcheck.dev/v1alpha1
+deviceClasses:
+- metadata:
+    name: gpu.example.com
+  spec:
+    selectors:
+    - cel:
+        expression: device.driver == "gpu.example.com"
+kind: Snapshot
+metadata:
+  capturedAt: null
+nodes:
+- metadata:
+    labels:
+      kubernetes.io/hostname: worker
+    name: worker
+  spec: {}
+  status:
+    daemonEndpoints:
+      kubeletEndpoint:
+        Port: 0
+    nodeInfo:
+      architecture: ""
+      bootID: ""
+      containerRuntimeVersion: ""
+      kernelVersion: ""
+      kubeProxyVersion: ""
+      kubeletVersion: ""
+      machineID: ""
+      operatingSystem: ""
+      osImage: ""
+      systemUUID: ""
+pods:
+- metadata:
+    name: train
+    namespace: ml
+    uid: uid-pod-train
+  spec:
+    containers: null
+    resourceClaims:
+    - name: full-gpu
+      resourceClaimName: full-gpu
+  status:
+    phase: Pending
+resourceClaims:
+- metadata:
+    name: full-gpu
+    namespace: ml
+    uid: uid-ml-full-gpu
+  spec:
+    devices:
+      requests:
+      - exactly:
+          allocationMode: ExactCount
+          count: 1
+          deviceClassName: gpu.example.com
+          selectors:
+          - cel:
+              expression: device.attributes["gpu.example.com"].profile == "full"
+        name: gpu
+  status: {}
+- metadata:
+    name: inference
+    namespace: ml
+    uid: uid-ml-inference
+  spec:
+    devices:
+      requests:
+      - exactly:
+          allocationMode: ExactCount
+          count: 1
+          deviceClassName: gpu.example.com
+        name: gpu
+  status:
+    allocation:
+      devices:
+        results:
+        - device: gpu-0-half-0
+          driver: gpu.example.com
+          pool: worker
+          request: gpu
+      nodeSelector:
+        nodeSelectorTerms:
+        - matchFields:
+          - key: metadata.name
+            operator: In
+            values:
+            - worker
+- metadata:
+    name: notebook
+    namespace: ml
+    uid: uid-ml-notebook
+  spec:
+    devices:
+      requests:
+      - exactly:
+          allocationMode: ExactCount
+          count: 1
+          deviceClassName: gpu.example.com
+        name: gpu
+  status:
+    allocation:
+      devices:
+        results:
+        - device: gpu-1-quarter-2
+          driver: gpu.example.com
+          pool: worker
+          request: gpu
+      nodeSelector:
+        nodeSelectorTerms:
+        - matchFields:
+          - key: metadata.name
+            operator: In
+            values:
+            - worker
+resourceSlices:
+- metadata:
+    name: worker-counters
+  spec:
+    driver: gpu.example.com
+    nodeName: worker
+    pool:
+      generation: 0
+      name: worker
+      resourceSliceCount: 2
+    sharedCounters:
+    - counters:
+        memory:
+          value: 80Gi
+      name: gpu-0
+    - counters:
+        memory:
+          value: 80Gi
+      name: gpu-1
+- metadata:
+    name: worker-partitions
+  spec:
+    devices:
+    - attributes:
+        model:
+          string: H100
+        parent:
+          string: gpu-0
+        profile:
+          string: full
+      capacity:
+        memory:
+          value: 80Gi
+      consumesCounters:
+      - counterSet: gpu-0
+        counters:
+          memory:
+            value: 80Gi
+      name: gpu-0-full
+    - attributes:
+        model:
+          string: H100
+        parent:
+          string: gpu-0
+        profile:
+          string: half
+      capacity:
+        memory:
+          value: 40Gi
+      consumesCounters:
+      - counterSet: gpu-0
+        counters:
+          memory:
+            value: 40Gi
+      name: gpu-0-half-0
+    - attributes:
+        model:
+          string: H100
+        parent:
+          string: gpu-0
+        profile:
+          string: half
+      capacity:
+        memory:
+          value: 40Gi
+      consumesCounters:
+      - counterSet: gpu-0
+        counters:
+          memory:
+            value: 40Gi
+      name: gpu-0-half-1
+    - attributes:
+        model:
+          string: H100
+        parent:
+          string: gpu-0
+        profile:
+          string: quarter
+      capacity:
+        memory:
+          value: 20Gi
+      consumesCounters:
+      - counterSet: gpu-0
+        counters:
+          memory:
+            value: 20Gi
+      name: gpu-0-quarter-0
+    - attributes:
+        model:
+          string: H100
+        parent:
+          string: gpu-0
+        profile:
+          string: quarter
+      capacity:
+        memory:
+          value: 20Gi
+      consumesCounters:
+      - counterSet: gpu-0
+        counters:
+          memory:
+            value: 20Gi
+      name: gpu-0-quarter-1
+    - attributes:
+        model:
+          string: H100
+        parent:
+          string: gpu-0
+        profile:
+          string: quarter
+      capacity:
+        memory:
+          value: 20Gi
+      consumesCounters:
+      - counterSet: gpu-0
+        counters:
+          memory:
+            value: 20Gi
+      name: gpu-0-quarter-2
+    - attributes:
+        model:
+          string: H100
+        parent:
+          string: gpu-0
+        profile:
+          string: quarter
+      capacity:
+        memory:
+          value: 20Gi
+      consumesCounters:
+      - counterSet: gpu-0
+        counters:
+          memory:
+            value: 20Gi
+      name: gpu-0-quarter-3
+    - attributes:
+        model:
+          string: H100
+        parent:
+          string: gpu-1
+        profile:
+          string: full
+      capacity:
+        memory:
+          value: 80Gi
+      consumesCounters:
+      - counterSet: gpu-1
+        counters:
+          memory:
+            value: 80Gi
+      name: gpu-1-full
+    - attributes:
+        model:
+          string: H100
+        parent:
+          string: gpu-1
+        profile:
+          string: half
+      capacity:
+        memory:
+          value: 40Gi
+      consumesCounters:
+      - counterSet: gpu-1
+        counters:
+          memory:
+            value: 40Gi
+      name: gpu-1-half-0
+    - attributes:
+        model:
+          string: H100
+        parent:
+          string: gpu-1
+        profile:
+          string: half
+      capacity:
+        memory:
+          value: 40Gi
+      consumesCounters:
+      - counterSet: gpu-1
+        counters:
+          memory:
+            value: 40Gi
+      name: gpu-1-half-1
+    - attributes:
+        model:
+          string: H100
+        parent:
+          string: gpu-1
+        profile:
+          string: quarter
+      capacity:
+        memory:
+          value: 20Gi
+      consumesCounters:
+      - counterSet: gpu-1
+        counters:
+          memory:
+            value: 20Gi
+      name: gpu-1-quarter-0
+    - attributes:
+        model:
+          string: H100
+        parent:
+          string: gpu-1
+        profile:
+          string: quarter
+      capacity:
+        memory:
+          value: 20Gi
+      consumesCounters:
+      - counterSet: gpu-1
+        counters:
+          memory:
+            value: 20Gi
+      name: gpu-1-quarter-1
+    - attributes:
+        model:
+          string: H100
+        parent:
+          string: gpu-1
+        profile:
+          string: quarter
+      capacity:
+        memory:
+          value: 20Gi
+      consumesCounters:
+      - counterSet: gpu-1
+        counters:
+          memory:
+            value: 20Gi
+      name: gpu-1-quarter-2
+    - attributes:
+        model:
+          string: H100
+        parent:
+          string: gpu-1
+        profile:
+          string: quarter
+      capacity:
+        memory:
+          value: 20Gi
+      consumesCounters:
+      - counterSet: gpu-1
+        counters:
+          memory:
+            value: 20Gi
+      name: gpu-1-quarter-3
+    driver: gpu.example.com
+    nodeName: worker
+    pool:
+      generation: 0
+      name: worker
+      resourceSliceCount: 2

@@ -3,6 +3,7 @@ package testutil
 
 import (
 	"fmt"
+	"sort"
 
 	corev1 "k8s.io/api/core/v1"
 	resourceapi "k8s.io/api/resource/v1"
@@ -235,4 +236,62 @@ func Standard() *B {
 			GPU{Name: "gpu-2", Model: "L40S", Memory: "40Gi"},
 			GPU{Name: "gpu-3", Model: "L40S", Memory: "40Gi"},
 		)
+}
+
+// Partition is one slice of a physical GPU that consumes its memory counter.
+type Partition struct {
+	Name    string
+	Profile string
+	Memory  string
+}
+
+// PartitionedSlice publishes physical GPUs as partitions that share a memory
+// counter per GPU, the way MIG-style drivers do. gpus maps a physical GPU
+// name to its total memory and partitions.
+func (b *B) PartitionedSlice(node string, gpus map[string]struct {
+	Memory     string
+	Partitions []Partition
+}) *B {
+	// Since v1.36, counter sets live in their own slice, separate from the
+	// devices that consume them.
+	pool := resourceapi.ResourcePool{Name: node, ResourceSliceCount: 2}
+	counters := resourceapi.ResourceSlice{
+		ObjectMeta: metav1.ObjectMeta{Name: node + "-counters"},
+		Spec:       resourceapi.ResourceSliceSpec{Driver: Driver, NodeName: ptr.To(node), Pool: pool},
+	}
+	sl := resourceapi.ResourceSlice{
+		ObjectMeta: metav1.ObjectMeta{Name: node + "-partitions"},
+		Spec:       resourceapi.ResourceSliceSpec{Driver: Driver, NodeName: ptr.To(node), Pool: pool},
+	}
+	names := make([]string, 0, len(gpus))
+	for n := range gpus {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, phys := range names {
+		g := gpus[phys]
+		counters.Spec.SharedCounters = append(counters.Spec.SharedCounters, resourceapi.CounterSet{
+			Name:     phys,
+			Counters: map[string]resourceapi.Counter{"memory": {Value: resource.MustParse(g.Memory)}},
+		})
+		for _, p := range g.Partitions {
+			sl.Spec.Devices = append(sl.Spec.Devices, resourceapi.Device{
+				Name: p.Name,
+				Attributes: map[resourceapi.QualifiedName]resourceapi.DeviceAttribute{
+					"model":   {StringValue: ptr.To("H100")},
+					"profile": {StringValue: ptr.To(p.Profile)},
+					"parent":  {StringValue: ptr.To(phys)},
+				},
+				Capacity: map[resourceapi.QualifiedName]resourceapi.DeviceCapacity{
+					"memory": {Value: resource.MustParse(p.Memory)},
+				},
+				ConsumesCounters: []resourceapi.DeviceCounterConsumption{{
+					CounterSet: phys,
+					Counters:   map[string]resourceapi.Counter{"memory": {Value: resource.MustParse(p.Memory)}},
+				}},
+			})
+		}
+	}
+	b.S.ResourceSlices = append(b.S.ResourceSlices, counters, sl)
+	return b
 }
