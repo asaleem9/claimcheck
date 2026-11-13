@@ -1,0 +1,97 @@
+apiVersion: claimcheck.dev/v1alpha1
+deviceClasses:
+- metadata:
+    name: gpu.example.com
+  spec:
+    selectors:
+    - cel:
+        expression: device.driver == "gpu.example.com"
+kind: Snapshot
+metadata:
+  capturedAt: null
+nodes:
+- metadata:
+    labels:
+      kubernetes.io/hostname: worker
+    name: worker
+  spec: {}
+  status:
+    daemonEndpoints:
+      kubeletEndpoint:
+        Port: 0
+    nodeInfo:
+      architecture: ""
+      bootID: ""
+      containerRuntimeVersion: ""
+      kernelVersion: ""
+      kubeProxyVersion: ""
+      kubeletVersion: ""
+      machineID: ""
+      operatingSystem: ""
+      osImage: ""
+      systemUUID: ""
+pods:
+- metadata:
+    name: tp-train
+    namespace: ml
+    uid: uid-pod-tp-train
+  spec:
+    containers: null
+    resourceClaims:
+    - name: nvlinked
+      resourceClaimName: nvlinked
+  status:
+    phase: Pending
+resourceClaims:
+- metadata:
+    name: nvlinked
+    namespace: ml
+    uid: uid-ml-nvlinked
+  spec:
+    devices:
+      constraints:
+      - matchAttribute: gpu.example.com/nvlink
+        requests:
+        - a
+        - b
+      requests:
+      - exactly:
+          allocationMode: ExactCount
+          count: 1
+          deviceClassName: gpu.example.com
+        name: a
+      - exactly:
+          allocationMode: ExactCount
+          count: 1
+          deviceClassName: gpu.example.com
+        name: b
+  status: {}
+resourceSlices:
+- metadata:
+    name: worker-gpu.example.com
+  spec:
+    devices:
+    - attributes:
+        model:
+          string: H100
+        nvlink:
+          string: domain-a
+      capacity:
+        memory:
+          value: 80Gi
+      name: gpu-0
+    - attributes:
+        model:
+          string: H100
+        nvlink:
+          string: domain-b
+      capacity:
+        memory:
+          value: 80Gi
+      name: gpu-1
+    driver: gpu.example.com
+    nodeName: worker
+    pool:
+      generation: 0
+      name: worker
+      resourceSliceCount: 1

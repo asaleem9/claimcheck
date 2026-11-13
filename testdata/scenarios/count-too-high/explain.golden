@@ -1,0 +1,31 @@
+
+pod ml/ddp  (Pending)
+
+ BLOCKED   No eligible node can allocate the claims (3 nodes checked).
+
+Claims
+  eight-gpus   pending   
+
+Nodes (allocator verdict · why)
+  control-plane   ✗   gpus: no devices
+  worker-a        ✗   gpus 4/6 usable
+  worker-b        ✗   gpus 4/6 usable
+
+Why
+  request "gpus" in ml/eight-gpus: needs 6, 4 usable on worker-a, the closest node (8 devices considered).
+    8 usable devices exist across nodes, but a claim is allocated on a single node; the most on one node is 4.
+
+Devices on worker-a
+  REQUEST   DEVICE           RESULT     DETAIL
+  gpus      worker-a/gpu-0   ✓ usable   
+  gpus      worker-a/gpu-1   ✓ usable   
+  gpus      worker-a/gpu-2   ✓ usable   
+  gpus      worker-a/gpu-3   ✓ usable   
+
+Devices on worker-b
+  REQUEST   DEVICE           RESULT     DETAIL
+  gpus      worker-b/gpu-0   ✓ usable   
+  gpus      worker-b/gpu-1   ✓ usable   
+  gpus      worker-b/gpu-2   ✓ usable   
+  gpus      worker-b/gpu-3   ✓ usable   
+

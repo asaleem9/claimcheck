@@ -1,0 +1,24 @@
+# target: resourceclaim/one-gpu
+# namespace: cc-fits
+# expect-status: Fits
+# A standalone claim no pod uses yet stays unallocated, so claimcheck can
+# report where it would fit.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cc-fits
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaim
+metadata:
+  namespace: cc-fits
+  name: one-gpu
+spec:
+  devices:
+    requests:
+    - name: gpu
+      exactly:
+        deviceClassName: gpu.example.com
+        selectors:
+        - cel:
+            expression: "device.attributes['gpu.example.com'].model == 'LATEST-GPU-MODEL'"

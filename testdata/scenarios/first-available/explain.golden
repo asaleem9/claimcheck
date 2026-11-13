@@ -1,0 +1,45 @@
+
+pod ml/flex-train  (Pending)
+
+ BLOCKED   No eligible node can allocate the claims (3 nodes checked).
+
+Claims
+  flex   pending   
+
+Nodes (allocator verdict · why)
+  control-plane   ✗   gpu/h100: no devices | gpu/two-l40s: no devices
+  worker-a        ✗   gpu/h100 0/1 usable · 4 fail selector #0 | gpu/two-l40s 4/5 usable
+  worker-b        ✗   gpu/h100 0/1 usable · 2 in use, 2 fail selector #0 | gpu/two-l40s 2/5 usable · 2 fail selector #0
+
+Why
+  request "gpu/h100" in ml/flex: needs 1, 0 usable (8 devices considered).
+    selector #0 rejects 6 of 8 devices: device.attributes["gpu.example.com"].model == "H100"
+        values seen: model=L40S ×6
+    2 of 8 devices match but are already allocated: ml/a ×2
+  request "gpu/two-l40s" in ml/flex: needs 5, 4 usable on worker-a, the closest node (8 devices considered).
+    selector #0 rejects 2 of 8 devices: device.attributes["gpu.example.com"].model == "L40S"
+        values seen: model=H100 ×2
+    6 usable devices exist across nodes, but a claim is allocated on a single node; the most on one node is 4.
+
+Devices on worker-a
+  REQUEST        DEVICE           RESULT               DETAIL
+  gpu/h100       worker-a/gpu-0   ✗ fail selector #0   model=L40S
+  gpu/h100       worker-a/gpu-1   ✗ fail selector #0   model=L40S
+  gpu/h100       worker-a/gpu-2   ✗ fail selector #0   model=L40S
+  gpu/h100       worker-a/gpu-3   ✗ fail selector #0   model=L40S
+  gpu/two-l40s   worker-a/gpu-0   ✓ usable             
+  gpu/two-l40s   worker-a/gpu-1   ✓ usable             
+  gpu/two-l40s   worker-a/gpu-2   ✓ usable             
+  gpu/two-l40s   worker-a/gpu-3   ✓ usable             
+
+Devices on worker-b
+  REQUEST        DEVICE           RESULT               DETAIL
+  gpu/h100       worker-b/gpu-0   ✗ in use             allocated to ml/a
+  gpu/h100       worker-b/gpu-1   ✗ in use             allocated to ml/a
+  gpu/h100       worker-b/gpu-2   ✗ fail selector #0   model=L40S
+  gpu/h100       worker-b/gpu-3   ✗ fail selector #0   model=L40S
+  gpu/two-l40s   worker-b/gpu-0   ✗ fail selector #0   model=H100
+  gpu/two-l40s   worker-b/gpu-1   ✗ fail selector #0   model=H100
+  gpu/two-l40s   worker-b/gpu-2   ✓ usable             
+  gpu/two-l40s   worker-b/gpu-3   ✓ usable             
+

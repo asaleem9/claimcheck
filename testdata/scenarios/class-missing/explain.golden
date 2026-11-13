@@ -1,0 +1,16 @@
+
+pod ml/jax  (Pending)
+
+ ERROR   The allocator fails with an error, so the scheduler can't place this on any node.
+
+Claims
+  tpu   pending   
+
+Nodes (allocator verdict · why)
+  control-plane   error   claim ml/tpu, request tpu: could not retrieve device class tpu.example.com: deviceclasses.resource.k8s.io "tpu.example.com" not found
+  worker-a        error   claim ml/tpu, request tpu: could not retrieve device class tpu.example.com: deviceclasses.resource.k8s.io "tpu.example.com" not found
+  worker-b        error   claim ml/tpu, request tpu: could not retrieve device class tpu.example.com: deviceclasses.resource.k8s.io "tpu.example.com" not found
+
+Why
+  request "tpu" in ml/tpu: DeviceClass "tpu.example.com" not found.
+

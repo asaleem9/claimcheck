@@ -1,0 +1,37 @@
+# target: pod/jax
+# namespace: cc-class
+# expect-status: AllocatorError
+# expect-reason: DeviceClass "tpu.example.com" not found
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cc-class
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  namespace: cc-class
+  name: tpu
+spec:
+  spec:
+    devices:
+      requests:
+      - name: tpu
+        exactly:
+          deviceClassName: tpu.example.com
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: cc-class
+  name: jax
+spec:
+  containers:
+  - name: jax
+    image: registry.k8s.io/pause:3.10
+    resources:
+      claims:
+      - name: tpu
+  resourceClaims:
+  - name: tpu
+    resourceClaimTemplateName: tpu

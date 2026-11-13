@@ -1,0 +1,17 @@
+# Take every mock GPU out of rotation, as an admin would during a driver upgrade.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cc-tainted
+---
+apiVersion: resource.k8s.io/v1
+kind: DeviceTaintRule
+metadata:
+  name: cc-e2e-maintenance
+spec:
+  deviceSelector:
+    driver: gpu.example.com
+  taint:
+    key: example.com/maintenance
+    value: driver-upgrade
+    effect: NoSchedule

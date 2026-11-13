@@ -1,0 +1,30 @@
+
+pod ml/train  (Pending)
+
+ FITS   The claims can be allocated on 2 of 3 eligible nodes.
+
+Claims
+  train-gpu   pending   
+
+Nodes (allocator verdict · why)
+  control-plane   ✗        gpu: no devices
+  worker-a        ✓ fits   gpu→gpu-0
+  worker-b        ✓ fits   gpu→gpu-0
+
+Notes
+  • the pod is Pending even though DRA would fit; check other scheduling constraints or whether the scheduler has retried since the cluster changed
+
+Devices on worker-a
+  REQUEST   DEVICE           RESULT     DETAIL
+  gpu       worker-a/gpu-0   ✓ usable   
+  gpu       worker-a/gpu-1   ✓ usable   
+  gpu       worker-a/gpu-2   ✓ usable   
+  gpu       worker-a/gpu-3   ✓ usable   
+
+Devices on worker-b
+  REQUEST   DEVICE           RESULT     DETAIL
+  gpu       worker-b/gpu-0   ✓ usable   
+  gpu       worker-b/gpu-1   ✓ usable   
+  gpu       worker-b/gpu-2   ✓ usable   
+  gpu       worker-b/gpu-3   ✓ usable   
+

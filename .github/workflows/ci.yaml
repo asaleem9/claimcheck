@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Unit, golden and agreement tests
+        run: go test -race ./...
+      - name: Golden files are up to date
+        run: |
+          go test ./internal/explain -run TestScenarios -update
+          git diff --exit-code testdata/
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.15.0
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: azure/setup-helm@v4
+      - uses: helm/kind-action@v1
+        with:
+          install_only: true
+      - name: Create cluster with mock GPUs
+        run: hack/kind/up.sh
+      - name: End-to-end tests against kube-scheduler
+        run: go test -tags e2e ./test/e2e -v -count=1

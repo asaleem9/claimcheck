@@ -1,0 +1,39 @@
+# target: pod/ddp
+# namespace: cc-count
+# expect-status: Blocked
+# expect-reason: needs 9, 8 usable
+# Each worker has 8 GPUs; one pod's claim can't span nodes.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cc-count
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  namespace: cc-count
+  name: nine-gpus
+spec:
+  spec:
+    devices:
+      requests:
+      - name: gpus
+        exactly:
+          deviceClassName: gpu.example.com
+          count: 9
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: cc-count
+  name: ddp
+spec:
+  containers:
+  - name: train
+    image: registry.k8s.io/pause:3.10
+    resources:
+      claims:
+      - name: gpus
+  resourceClaims:
+  - name: gpus
+    resourceClaimTemplateName: nine-gpus

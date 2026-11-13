@@ -1,0 +1,55 @@
+# Two pods that take all 8 mock GPUs on each worker.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cc-in-use
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  namespace: cc-in-use
+  name: eight-gpus
+spec:
+  spec:
+    devices:
+      requests:
+      - name: gpus
+        exactly:
+          deviceClassName: gpu.example.com
+          count: 8
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: cc-in-use
+  name: hog-general
+spec:
+  nodeSelector:
+    pool: general
+  containers:
+  - name: hog
+    image: registry.k8s.io/pause:3.10
+    resources:
+      claims:
+      - name: gpus
+  resourceClaims:
+  - name: gpus
+    resourceClaimTemplateName: eight-gpus
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: cc-in-use
+  name: hog-training
+spec:
+  nodeSelector:
+    pool: training
+  containers:
+  - name: hog
+    image: registry.k8s.io/pause:3.10
+    resources:
+      claims:
+      - name: gpus
+  resourceClaims:
+  - name: gpus
+    resourceClaimTemplateName: eight-gpus

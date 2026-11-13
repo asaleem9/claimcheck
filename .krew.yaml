@@ -1,0 +1,32 @@
+apiVersion: krew.googlecontainertools.github.com/v1alpha2
+kind: Plugin
+metadata:
+  name: claimcheck
+spec:
+  version: {{ .TagName }}
+  homepage: https://github.com/asaleem9/claimcheck
+  shortDescription: Explain why DRA can't allocate devices to a pod
+  description: |
+    claimcheck replays kube-scheduler's own Dynamic Resource Allocation
+    allocator against your cluster and explains, device by device, why a
+    ResourceClaim can't be allocated: failing CEL selectors with the actual
+    attribute values, devices held by other claims, device taints, missing
+    DeviceClasses, and requests that compete for the same devices.
+    It is read-only and can also run offline from a snapshot file.
+  platforms:
+{{- range $os := list "linux" "darwin" }}
+{{- range $arch := list "amd64" "arm64" }}
+  - selector:
+      matchLabels:
+        os: {{ $os }}
+        arch: {{ $arch }}
+    {{ addURIAndSha (printf "https://github.com/asaleem9/claimcheck/releases/download/%s/kubectl-claimcheck_%s_%s.tar.gz" $.TagName $os $arch) $.TagName }}
+    bin: kubectl-claimcheck
+{{- end }}
+{{- end }}
+  - selector:
+      matchLabels:
+        os: windows
+        arch: amd64
+    {{ addURIAndSha (printf "https://github.com/asaleem9/claimcheck/releases/download/%s/kubectl-claimcheck_windows_amd64.zip" .TagName) .TagName }}
+    bin: kubectl-claimcheck.exe

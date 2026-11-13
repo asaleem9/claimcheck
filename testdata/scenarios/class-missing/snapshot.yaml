@@ -1,0 +1,178 @@
+apiVersion: claimcheck.dev/v1alpha1
+deviceClasses:
+- metadata:
+    name: gpu.example.com
+  spec:
+    selectors:
+    - cel:
+        expression: device.driver == "gpu.example.com"
+kind: Snapshot
+metadata:
+  capturedAt: null
+nodes:
+- metadata:
+    labels:
+      kubernetes.io/hostname: control-plane
+      node-role.kubernetes.io/control-plane: ""
+    name: control-plane
+  spec: {}
+  status:
+    daemonEndpoints:
+      kubeletEndpoint:
+        Port: 0
+    nodeInfo:
+      architecture: ""
+      bootID: ""
+      containerRuntimeVersion: ""
+      kernelVersion: ""
+      kubeProxyVersion: ""
+      kubeletVersion: ""
+      machineID: ""
+      operatingSystem: ""
+      osImage: ""
+      systemUUID: ""
+- metadata:
+    labels:
+      kubernetes.io/hostname: worker-a
+      pool: general
+    name: worker-a
+  spec: {}
+  status:
+    daemonEndpoints:
+      kubeletEndpoint:
+        Port: 0
+    nodeInfo:
+      architecture: ""
+      bootID: ""
+      containerRuntimeVersion: ""
+      kernelVersion: ""
+      kubeProxyVersion: ""
+      kubeletVersion: ""
+      machineID: ""
+      operatingSystem: ""
+      osImage: ""
+      systemUUID: ""
+- metadata:
+    labels:
+      kubernetes.io/hostname: worker-b
+      pool: training
+    name: worker-b
+  spec: {}
+  status:
+    daemonEndpoints:
+      kubeletEndpoint:
+        Port: 0
+    nodeInfo:
+      architecture: ""
+      bootID: ""
+      containerRuntimeVersion: ""
+      kernelVersion: ""
+      kubeProxyVersion: ""
+      kubeletVersion: ""
+      machineID: ""
+      operatingSystem: ""
+      osImage: ""
+      systemUUID: ""
+pods:
+- metadata:
+    name: jax
+    namespace: ml
+    uid: uid-pod-jax
+  spec:
+    containers: null
+    resourceClaims:
+    - name: tpu
+      resourceClaimName: tpu
+  status:
+    phase: Pending
+resourceClaims:
+- metadata:
+    name: tpu
+    namespace: ml
+    uid: uid-ml-tpu
+  spec:
+    devices:
+      requests:
+      - exactly:
+          allocationMode: ExactCount
+          count: 1
+          deviceClassName: tpu.example.com
+        name: tpu
+  status: {}
+resourceSlices:
+- metadata:
+    name: worker-a-gpu.example.com
+  spec:
+    devices:
+    - attributes:
+        model:
+          string: L40S
+      capacity:
+        memory:
+          value: 40Gi
+      name: gpu-0
+    - attributes:
+        model:
+          string: L40S
+      capacity:
+        memory:
+          value: 40Gi
+      name: gpu-1
+    - attributes:
+        model:
+          string: L40S
+      capacity:
+        memory:
+          value: 40Gi
+      name: gpu-2
+    - attributes:
+        model:
+          string: L40S
+      capacity:
+        memory:
+          value: 40Gi
+      name: gpu-3
+    driver: gpu.example.com
+    nodeName: worker-a
+    pool:
+      generation: 0
+      name: worker-a
+      resourceSliceCount: 1
+- metadata:
+    name: worker-b-gpu.example.com
+  spec:
+    devices:
+    - attributes:
+        model:
+          string: H100
+      capacity:
+        memory:
+          value: 80Gi
+      name: gpu-0
+    - attributes:
+        model:
+          string: H100
+      capacity:
+        memory:
+          value: 80Gi
+      name: gpu-1
+    - attributes:
+        model:
+          string: L40S
+      capacity:
+        memory:
+          value: 40Gi
+      name: gpu-2
+    - attributes:
+        model:
+          string: L40S
+      capacity:
+        memory:
+          value: 40Gi
+      name: gpu-3
+    driver: gpu.example.com
+    nodeName: worker-b
+    pool:
+      generation: 0
+      name: worker-b
+      resourceSliceCount: 1

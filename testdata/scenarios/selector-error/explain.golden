@@ -1,0 +1,33 @@
+
+pod ml/train  (Pending)
+
+ ERROR   The allocator fails with an error, so the scheduler can't place this on any node.
+
+Claims
+  gpu   pending   
+
+Nodes (allocator verdict · why)
+  control-plane   ✗       gpu: no devices
+  worker-a        error   claim ml/gpu: selector #0 on device gpu.example.com/worker-a/gpu-0: CEL runtime error: no such key: architecture
+  worker-b        error   claim ml/gpu: selector #0 on device gpu.example.com/worker-b/gpu-0: CEL runtime error: no such key: architecture
+
+Why
+  request "gpu" in ml/gpu: needs 1, 0 usable (8 devices considered).
+    selector #0 fails at runtime on 8 of 8 devices: no such key: architecture
+        the scheduler treats this as an error for the whole pod
+        guard optional attributes with has(...) or optional chaining (.?...orValue())
+
+Devices on worker-a
+  REQUEST   DEVICE           RESULT             DETAIL
+  gpu       worker-a/gpu-0   ✗ selector error   no such key: architecture
+  gpu       worker-a/gpu-1   ✗ selector error   no such key: architecture
+  gpu       worker-a/gpu-2   ✗ selector error   no such key: architecture
+  gpu       worker-a/gpu-3   ✗ selector error   no such key: architecture
+
+Devices on worker-b
+  REQUEST   DEVICE           RESULT             DETAIL
+  gpu       worker-b/gpu-0   ✗ selector error   no such key: architecture
+  gpu       worker-b/gpu-1   ✗ selector error   no such key: architecture
+  gpu       worker-b/gpu-2   ✗ selector error   no such key: architecture
+  gpu       worker-b/gpu-3   ✗ selector error   no such key: architecture
+

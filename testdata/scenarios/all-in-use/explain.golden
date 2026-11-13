@@ -1,0 +1,33 @@
+
+pod ml/llm-train  (Pending)
+
+ BLOCKED   No eligible node can allocate the claims (3 nodes checked).
+
+Claims
+  llm-train-gpu   pending   
+
+Nodes (allocator verdict · why)
+  control-plane   ✗   gpu: no devices
+  worker-a        ✗   gpu 0/1 usable · 4 fail selector #0
+  worker-b        ✗   gpu 0/1 usable · 2 in use, 2 fail selector #0
+
+Why
+  request "gpu" in ml/llm-train-gpu: needs 1, 0 usable (8 devices considered).
+    selector #0 rejects 6 of 8 devices: device.capacity["gpu.example.com"].memory.compareTo(quantity("80Gi")) >= 0
+        values seen: memory=40Gi ×6
+    2 of 8 devices match but are already allocated: ml/finetune-0-gpu ×1 · research/notebook-gpu ×1
+
+Devices on worker-a
+  REQUEST   DEVICE           RESULT               DETAIL
+  gpu       worker-a/gpu-0   ✗ fail selector #0   memory=40Gi
+  gpu       worker-a/gpu-1   ✗ fail selector #0   memory=40Gi
+  gpu       worker-a/gpu-2   ✗ fail selector #0   memory=40Gi
+  gpu       worker-a/gpu-3   ✗ fail selector #0   memory=40Gi
+
+Devices on worker-b
+  REQUEST   DEVICE           RESULT               DETAIL
+  gpu       worker-b/gpu-0   ✗ in use             allocated to ml/finetune-0-gpu
+  gpu       worker-b/gpu-1   ✗ in use             allocated to research/notebook-gpu
+  gpu       worker-b/gpu-2   ✗ fail selector #0   memory=40Gi
+  gpu       worker-b/gpu-3   ✗ fail selector #0   memory=40Gi
+

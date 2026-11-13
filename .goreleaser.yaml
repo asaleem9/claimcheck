@@ -1,0 +1,27 @@
+version: 2
+
+project_name: claimcheck
+
+builds:
+  - id: kubectl-claimcheck
+    main: ./cmd/kubectl-claimcheck
+    binary: kubectl-claimcheck
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X github.com/asaleem9/claimcheck/internal/cli.Version={{ .Version }}
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "kubectl-claimcheck_{{ .Os }}_{{ .Arch }}"
+    files: [LICENSE, README.md]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc

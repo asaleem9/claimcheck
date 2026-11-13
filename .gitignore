@@ -1,0 +1,19 @@
+# Build output
+/bin/
+/dist/
+*.test
+*.out
+coverage.*
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Local assistant config (never commit)
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+
+# Local kind state
+/hack/kind/.cache/

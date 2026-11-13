@@ -1,0 +1,28 @@
+
+pod ml/train-and-eval  (Pending)
+
+ BLOCKED   No eligible node can allocate the claims (1 node checked).
+
+Claims
+  pair   pending   
+
+Nodes (allocator verdict · why)
+  control-plane   –   excluded: nodeSelector pool=training does not match
+  worker-a        –   excluded: nodeSelector pool=training does not match
+  worker-b        ✗   requests compete for the same devices
+
+Why
+  On worker-b every request can be met on its own, but not all at once:
+      "trainer" and "evaluator" need 2 devices between them but can only use 1: gpu-0
+
+Devices on worker-b
+  REQUEST     DEVICE           RESULT               DETAIL
+  trainer     worker-b/gpu-0   ✓ usable             
+  trainer     worker-b/gpu-1   ✗ in use             allocated to ml/other
+  trainer     worker-b/gpu-2   ✗ fail selector #0   model=L40S
+  trainer     worker-b/gpu-3   ✗ fail selector #0   model=L40S
+  evaluator   worker-b/gpu-0   ✓ usable             
+  evaluator   worker-b/gpu-1   ✗ in use             allocated to ml/other
+  evaluator   worker-b/gpu-2   ✗ fail selector #0   model=L40S
+  evaluator   worker-b/gpu-3   ✗ fail selector #0   model=L40S
+

@@ -1,0 +1,32 @@
+# target: pod/train
+# namespace: cc-tainted
+# expect-status: Blocked
+# expect-reason: Tainted
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  namespace: cc-tainted
+  name: one-gpu
+spec:
+  spec:
+    devices:
+      requests:
+      - name: gpu
+        exactly:
+          deviceClassName: gpu.example.com
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: cc-tainted
+  name: train
+spec:
+  containers:
+  - name: train
+    image: registry.k8s.io/pause:3.10
+    resources:
+      claims:
+      - name: gpu
+  resourceClaims:
+  - name: gpu
+    resourceClaimTemplateName: one-gpu
