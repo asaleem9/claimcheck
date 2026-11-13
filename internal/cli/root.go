@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime/debug"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
@@ -92,7 +94,11 @@ func newVersion(g *globals) *cobra.Command {
 		Short: "Print the claimcheck version",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			_, err := fmt.Fprintf(g.out, "claimcheck %s (allocator k8s.io/dynamic-resource-allocation v0.37.2)\n", Version)
+			v := Version
+			if bi, ok := debug.ReadBuildInfo(); ok && v == "dev" && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+				v = strings.TrimPrefix(bi.Main.Version, "v") // go install ...@vX.Y.Z
+			}
+			_, err := fmt.Fprintf(g.out, "claimcheck %s (allocator k8s.io/dynamic-resource-allocation v0.37.2)\n", v)
 			return err
 		},
 	}
