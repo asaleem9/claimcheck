@@ -1,0 +1,19 @@
+
+pod ml/trainer  (Pending)
+
+ BLOCKED   No eligible node can allocate the claims (1 node checked).
+
+Claims
+  net   pending   
+
+Nodes (allocator verdict · why)
+  worker   ✗   net 0/1 usable · 1 capacity used up
+
+Why
+  request "net" in ml/net: needs 1, 0 usable (1 device considered).
+    the only device matches, but other claims have used up its shared capacity: needs bandwidth=4G, 2G of 10G left; shared with serving/llm-a-net, serving/llm-b-net ×1
+
+Devices on worker
+  REQUEST   DEVICE                RESULT               DETAIL
+  net       worker-shared/nic-0   ✗ capacity used up   needs bandwidth=4G, 2G of 10G left; shared with serving/llm-a-net, serving/llm-b-net
+

@@ -99,6 +99,8 @@ type Req struct {
 	FirstAvailable []Req
 	// Derived maps derived attribute names to CEL expressions.
 	Derived map[string]string
+	// Bandwidth requests that much capacity from a shared device.
+	Bandwidth string
 }
 
 // Claim adds an unallocated claim.
@@ -162,6 +164,11 @@ func exact(r Req) *resourceapi.ExactDeviceRequest {
 	}
 	for _, s := range r.Selectors {
 		ex.Selectors = append(ex.Selectors, resourceapi.DeviceSelector{CEL: &resourceapi.CELDeviceSelector{Expression: s}})
+	}
+	if r.Bandwidth != "" {
+		ex.Capacity = &resourceapi.CapacityRequirements{Requests: map[resourceapi.QualifiedName]resource.Quantity{
+			"bandwidth": resource.MustParse(r.Bandwidth),
+		}}
 	}
 	for name, expr := range r.Derived {
 		ex.DerivedAttributes = append(ex.DerivedAttributes, resourceapi.DeviceDerivedAttribute{
@@ -293,5 +300,71 @@ func (b *B) PartitionedSlice(node string, gpus map[string]struct {
 		}
 	}
 	b.S.ResourceSlices = append(b.S.ResourceSlices, counters, sl)
+	return b
+}
+
+// SharedDevice is a device several claims can use at once, each taking part
+// of its bandwidth (consumable capacity).
+type SharedDevice struct {
+	Name      string
+	Bandwidth string
+	// Policy: requests must fall between Min and Max in Step increments,
+	// and requests without a bandwidth get Default.
+	Min, Max, Step, Default string
+}
+
+// SharedSlice publishes shared devices on a node.
+func (b *B) SharedSlice(node string, devs ...SharedDevice) *B {
+	sl := resourceapi.ResourceSlice{
+		ObjectMeta: metav1.ObjectMeta{Name: node + "-shared"},
+		Spec: resourceapi.ResourceSliceSpec{
+			Driver: Driver, NodeName: ptr.To(node),
+			Pool: resourceapi.ResourcePool{Name: node + "-shared", ResourceSliceCount: 1},
+		},
+	}
+	for _, d := range devs {
+		policy := &resourceapi.CapacityRequestPolicy{ValidRange: &resourceapi.CapacityRequestPolicyRange{Min: ptr.To(resource.MustParse(d.Min))}}
+		if d.Max != "" {
+			policy.ValidRange.Max = ptr.To(resource.MustParse(d.Max))
+		}
+		if d.Step != "" {
+			policy.ValidRange.Step = ptr.To(resource.MustParse(d.Step))
+		}
+		if d.Default != "" {
+			policy.Default = ptr.To(resource.MustParse(d.Default))
+		}
+		sl.Spec.Devices = append(sl.Spec.Devices, resourceapi.Device{
+			Name:                     d.Name,
+			AllowMultipleAllocations: ptr.To(true),
+			Attributes: map[resourceapi.QualifiedName]resourceapi.DeviceAttribute{
+				"model": {StringValue: ptr.To("NIC")},
+			},
+			Capacity: map[resourceapi.QualifiedName]resourceapi.DeviceCapacity{
+				"bandwidth": {Value: resource.MustParse(d.Bandwidth), RequestPolicy: policy},
+			},
+		})
+	}
+	b.S.ResourceSlices = append(b.S.ResourceSlices, sl)
+	return b
+}
+
+// AllocatedShare adds a claim that holds a share of a shared device.
+func (b *B) AllocatedShare(ns, name, node, device, bandwidth string) *B {
+	share := types.UID("share-" + ns + "-" + name)
+	c := resourceapi.ResourceClaim{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name, UID: types.UID("uid-" + ns + "-" + name)}}
+	c.Spec.Devices.Requests = []resourceapi.DeviceRequest{{Name: "net", Exactly: &resourceapi.ExactDeviceRequest{
+		DeviceClassName: "gpu.example.com", AllocationMode: resourceapi.DeviceAllocationModeExactCount, Count: 1,
+		Capacity: &resourceapi.CapacityRequirements{Requests: map[resourceapi.QualifiedName]resource.Quantity{"bandwidth": resource.MustParse(bandwidth)}},
+	}}}
+	c.Status.Allocation = &resourceapi.AllocationResult{
+		NodeSelector: &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{{
+			MatchFields: []corev1.NodeSelectorRequirement{{Key: "metadata.name", Operator: corev1.NodeSelectorOpIn, Values: []string{node}}},
+		}}},
+		Devices: resourceapi.DeviceAllocationResult{Results: []resourceapi.DeviceRequestAllocationResult{{
+			Request: "net", Driver: Driver, Pool: node + "-shared", Device: device, ShareID: &share,
+			ConsumedCapacity: map[resourceapi.QualifiedName]resource.Quantity{"bandwidth": resource.MustParse(bandwidth)},
+		}}},
+	}
+	b.S.ResourceClaims = append(b.S.ResourceClaims, c)
 	return b
 }

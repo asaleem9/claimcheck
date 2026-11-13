@@ -210,6 +210,45 @@ var scenarios = []scenario{
 		},
 		status: explain.Fits,
 	},
+	{
+		name: "shared-capacity-used-up",
+		build: func() *tu.B {
+			return sharedNIC().
+				AllocatedShare("serving", "llm-a-net", "worker", "nic-0", "4G").
+				AllocatedShare("serving", "llm-b-net", "worker", "nic-0", "4G").
+				Claim("ml", "net", tu.Req{Name: "net", Bandwidth: "4G", Selectors: []string{nic}}).
+				Pod("ml", "trainer", nil, "net")
+		},
+		status: explain.Blocked,
+	},
+	{
+		name: "shared-capacity-policy",
+		build: func() *tu.B {
+			return sharedNIC().
+				Claim("ml", "net", tu.Req{Name: "net", Bandwidth: "9G", Selectors: []string{nic}}).
+				Pod("ml", "trainer", nil, "net")
+		},
+		status: explain.Blocked,
+	},
+	{
+		name: "shared-capacity-fits",
+		build: func() *tu.B {
+			return sharedNIC().
+				AllocatedShare("serving", "llm-a-net", "worker", "nic-0", "4G").
+				Claim("ml", "net", tu.Req{Name: "ingest", Bandwidth: "3G", Selectors: []string{nic}}, tu.Req{Name: "sync", Bandwidth: "3G", Selectors: []string{nic}}).
+				Pod("ml", "trainer", nil, "net")
+		},
+		status: explain.Fits,
+	},
+}
+
+const nic = `device.attributes["gpu.example.com"].model == "NIC"`
+
+// sharedNIC has one worker with a 10G NIC that claims share in 1G steps,
+// up to 8G each.
+func sharedNIC() *tu.B {
+	return tu.New().Node("worker", nil).GPUClass().
+		SharedSlice("worker", tu.SharedDevice{Name: "nic-0", Bandwidth: "10G", Min: "1G", Max: "8G", Step: "1G", Default: "1G"})
 }
 
 // partitionedNode has one worker with two 80Gi GPUs, each published as one

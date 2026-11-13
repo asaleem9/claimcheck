@@ -1,0 +1,19 @@
+
+pod ml/trainer  (Pending)
+
+ BLOCKED   No eligible node can allocate the claims (1 node checked).
+
+Claims
+  net   pending   
+
+Nodes (allocator verdict · why)
+  worker   ✗   net 0/1 usable · 1 capacity never fits
+
+Why
+  request "net" in ml/net: needs 1, 0 usable (1 device considered).
+    the only device can never give this request what it asks for: bandwidth=9G is not allowed by the device's request policy (min 1G, max 8G, step 1G) ×1
+
+Devices on worker
+  REQUEST   DEVICE                RESULT                  DETAIL
+  net       worker-shared/nic-0   ✗ capacity never fits   bandwidth=9G is not allowed by the device's request policy (min 1G, max 8G, step 1G)
+

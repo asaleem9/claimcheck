@@ -5,6 +5,8 @@ import (
 	"flag"
 	"fmt"
 	"math/rand/v2"
+	"os"
+	"path/filepath"
 	"testing"
 
 	resourceapi "k8s.io/api/resource/v1"
@@ -36,6 +38,8 @@ func TestAgreement(t *testing.T) {
 		`true`,
 		`device.attributes["gpu.example.com"].?profile.orValue("") != "full"`,
 		`device.capacity["gpu.example.com"].memory.compareTo(quantity("40Gi")) <= 0`,
+		`device.attributes["gpu.example.com"].model == "NIC"`,
+		`device.attributes["gpu.example.com"].model != "NIC"`,
 	}
 	taint := resourceapi.DeviceTaint{Key: "example.com/unhealthy", Effect: resourceapi.DeviceTaintEffectNoSchedule}
 	toleration := resourceapi.DeviceToleration{Key: "example.com/unhealthy", Operator: resourceapi.DeviceTolerationOpExists}
@@ -55,6 +59,17 @@ func TestAgreement(t *testing.T) {
 		for n := range nodes {
 			node := fmt.Sprintf("node-%d", n)
 			b.Node(node, nil)
+			if r.IntN(3) == 0 {
+				// Shared NICs that claims split by bandwidth.
+				var nics []tu.SharedDevice
+				for i := range 1 + r.IntN(2) {
+					nics = append(nics, tu.SharedDevice{Name: fmt.Sprintf("nic-%d", i), Bandwidth: "10G", Min: "1G", Max: "8G", Step: "1G", Default: "1G"})
+				}
+				b.SharedSlice(node, nics...)
+				for i := range r.IntN(3) {
+					b.AllocatedShare("other", fmt.Sprintf("share-%s-%d", node, i), node, nics[r.IntN(len(nics))].Name, fmt.Sprintf("%dG", 1+r.IntN(6)))
+				}
+			}
 			if r.IntN(3) == 0 {
 				// MIG-style partitions sharing a memory counter per GPU.
 				phys := map[string]struct {
@@ -121,6 +136,9 @@ func TestAgreement(t *testing.T) {
 			if r.IntN(4) == 0 {
 				q.Tolerations = []resourceapi.DeviceToleration{toleration}
 			}
+			if r.IntN(4) == 0 {
+				q.Bandwidth = []string{"500M", "2G", "3G", "4G", "9G"}[r.IntN(5)]
+			}
 			return q
 		}
 		var claimNames []string
@@ -172,6 +190,9 @@ func TestAgreement(t *testing.T) {
 			}
 			if !n.Agree {
 				data, _ := b.S.Marshal()
+				if dir := os.Getenv("CLAIMCHECK_DUMP"); dir != "" {
+					_ = os.WriteFile(filepath.Join(dir, fmt.Sprintf("seed-%d.yaml", seed)), data, 0o644)
+				}
 				t.Fatalf("seed %d, node %s: allocator fits=%v err=%q, diagnosis fits=%v contention=%q\nsnapshot:\n%s",
 					seed, n.Node, n.Verdict.Fits, n.Verdict.Err, n.Diagnosis.Fits, n.Diagnosis.Contention, data)
 			}

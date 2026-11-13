@@ -20,6 +20,9 @@ type slot struct {
 	// interchangeable slots belong to the same ExactCount request and have
 	// identical options, so their order doesn't matter.
 	interchangeable bool
+	// share holds, for shared (allowMultipleAllocations) devices, the
+	// capacity this request would take from them.
+	share map[structured.DeviceID]map[resourceapi.QualifiedName]resource.Quantity
 }
 
 // constraintSpec is a claim's matchAttribute or distinctAttribute constraint.
@@ -107,6 +110,20 @@ type solver struct {
 	// uses and left model shared counters of partitionable devices.
 	uses func(structured.DeviceID) []counterUse
 	left map[counterKey]resource.Quantity
+	// capLeft and capInUse model shared devices with consumable capacity.
+	capLeft  func(structured.DeviceID) map[resourceapi.QualifiedName]resource.Quantity
+	capInUse func(structured.DeviceID) bool
+}
+
+// sharingMatters reports whether any option is a shared device, which one
+// claim can use for several requests while capacity lasts.
+func sharingMatters(slots []slot) bool {
+	for _, sl := range slots {
+		if len(sl.share) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // countersMatter reports whether any option consumes shared counters, in
@@ -179,11 +196,12 @@ func (s *solver) solve(cons []constraintSpec) (ok, unknown bool) {
 		if restricted == nil {
 			return false, true
 		}
-		if len(distinct) == 0 && !s.countersMatter(restricted) {
+		sharing := sharingMatters(restricted)
+		if len(distinct) == 0 && !s.countersMatter(restricted) && !sharing {
 			if matchAll(restricted) {
 				return true, false
 			}
-		} else if matchAll(restricted) {
+		} else if sharing || matchAll(restricted) {
 			found, exhausted := s.backtrack(restricted, distinct)
 			if found {
 				return true, false
@@ -220,7 +238,7 @@ func (s *solver) anyApplies(c constraintSpec) bool {
 func (s *solver) restrict(match []constraintSpec, values [][]string, pos []int, distinct []constraintSpec) []slot {
 	out := make([]slot, len(s.slots))
 	for i, sl := range s.slots {
-		out[i] = slot{claim: sl.claim, request: sl.request, interchangeable: sl.interchangeable}
+		out[i] = slot{claim: sl.claim, request: sl.request, interchangeable: sl.interchangeable, share: sl.share}
 	options:
 		for _, id := range sl.options {
 			for j, m := range match {
@@ -273,6 +291,9 @@ func (s *solver) backtrack(slots []slot, distinct []constraintSpec) (found, exha
 		left[k] = v.DeepCopy()
 	}
 	chosen := make([]int, len(order))
+	capLeft := map[structured.DeviceID]map[resourceapi.QualifiedName]resource.Quantity{}
+	shares := map[structured.DeviceID]int{}                // uses of each shared device in this search
+	sharedBy := map[structured.DeviceID]sets.Set[string]{} // requests already using it
 	steps := 0
 	var rec func(n int) bool
 	rec = func(n int) bool {
@@ -295,7 +316,21 @@ func (s *solver) backtrack(slots []slot, distinct []constraintSpec) (found, exha
 				exhausted = true
 				return false
 			}
-			if used.Has(id) {
+			share, shared := sl.share[id]
+			reqKey := sl.claim + " " + sl.request
+			if shared {
+				if sharedBy[id].Has(reqKey) {
+					continue // a request takes a device at most once
+				}
+				if capLeft[id] == nil {
+					capLeft[id] = s.capLeft(id)
+				}
+				for name, q := range share {
+					if l := capLeft[id][name]; l.Cmp(q) < 0 {
+						continue options
+					}
+				}
+			} else if used.Has(id) {
 				continue
 			}
 			var keys []string
@@ -310,7 +345,8 @@ func (s *solver) backtrack(slots []slot, distinct []constraintSpec) (found, exha
 				keys = append(keys, key)
 			}
 			var us []counterUse
-			if s.uses != nil {
+			countersCharged := shared && (shares[id] > 0 || s.capInUse(id)) // charged once per shared device
+			if s.uses != nil && !countersCharged {
 				us = s.uses(id)
 			}
 			for _, u := range us {
@@ -318,7 +354,20 @@ func (s *solver) backtrack(slots []slot, distinct []constraintSpec) (found, exha
 					continue options
 				}
 			}
-			used.Insert(id)
+			if shared {
+				shares[id]++
+				if sharedBy[id] == nil {
+					sharedBy[id] = sets.New[string]()
+				}
+				sharedBy[id].Insert(reqKey)
+				for name, q := range share {
+					l := capLeft[id][name]
+					l.Sub(q)
+					capLeft[id][name] = l
+				}
+			} else {
+				used.Insert(id)
+			}
 			for j, key := range keys {
 				if key != "" {
 					taken[j].Insert(key)
@@ -334,7 +383,17 @@ func (s *solver) backtrack(slots []slot, distinct []constraintSpec) (found, exha
 			if rec(n + 1) {
 				return true
 			}
-			used.Delete(id)
+			if shared {
+				shares[id]--
+				sharedBy[id].Delete(reqKey)
+				for name, q := range share {
+					l := capLeft[id][name]
+					l.Add(q)
+					capLeft[id][name] = l
+				}
+			} else {
+				used.Delete(id)
+			}
 			for j, key := range keys {
 				if key != "" {
 					taken[j].Delete(key)
@@ -384,7 +443,11 @@ func matchAll(slots []slot) bool {
 // explain describes why the slots can't be filled: plain contention for
 // devices, a specific constraint, or constraints that conflict together.
 func (s *solver) explain() (contention, counters, constraint string) {
-	if !matchAll(s.slots) {
+	if sharingMatters(s.slots) {
+		if ok, unknown := s.solve(nil); !ok && !unknown {
+			return contentionMessage(s.slots) + " (shared devices are limited by their remaining capacity)", "", ""
+		}
+	} else if !matchAll(s.slots) {
 		return contentionMessage(s.slots), "", ""
 	}
 	if s.countersMatter(s.slots) {
@@ -535,19 +598,26 @@ func buildSlots(reqs []Request) []slot {
 			continue
 		}
 		var usable []structured.DeviceID
+		var share map[structured.DeviceID]map[resourceapi.QualifiedName]resource.Quantity
 		for _, dv := range r.Devices {
 			if dv.Reason == Available {
 				usable = append(usable, dv.ID())
+				if dv.share != nil {
+					if share == nil {
+						share = map[structured.DeviceID]map[resourceapi.QualifiedName]resource.Quantity{}
+					}
+					share[dv.ID()] = dv.share
+				}
 			}
 		}
 		if r.Mode == resourceapi.DeviceAllocationModeAll {
 			for _, id := range usable {
-				slots = append(slots, slot{claim: r.Claim, request: r.Name, options: []structured.DeviceID{id}})
+				slots = append(slots, slot{claim: r.Claim, request: r.Name, options: []structured.DeviceID{id}, share: share})
 			}
 			continue
 		}
 		for range r.Needed {
-			slots = append(slots, slot{claim: r.Claim, request: r.Name, options: usable, interchangeable: true})
+			slots = append(slots, slot{claim: r.Claim, request: r.Name, options: usable, interchangeable: true, share: share})
 		}
 	}
 	return slots

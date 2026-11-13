@@ -1,0 +1,89 @@
+apiVersion: claimcheck.dev/v1alpha1
+deviceClasses:
+- metadata:
+    name: gpu.example.com
+  spec:
+    selectors:
+    - cel:
+        expression: device.driver == "gpu.example.com"
+kind: Snapshot
+metadata:
+  capturedAt: null
+nodes:
+- metadata:
+    labels:
+      kubernetes.io/hostname: worker
+    name: worker
+  spec: {}
+  status:
+    daemonEndpoints:
+      kubeletEndpoint:
+        Port: 0
+    nodeInfo:
+      architecture: ""
+      bootID: ""
+      containerRuntimeVersion: ""
+      kernelVersion: ""
+      kubeProxyVersion: ""
+      kubeletVersion: ""
+      machineID: ""
+      operatingSystem: ""
+      osImage: ""
+      systemUUID: ""
+pods:
+- metadata:
+    name: trainer
+    namespace: ml
+    uid: uid-pod-trainer
+  spec:
+    containers: null
+    resourceClaims:
+    - name: net
+      resourceClaimName: net
+  status:
+    phase: Pending
+resourceClaims:
+- metadata:
+    name: net
+    namespace: ml
+    uid: uid-ml-net
+  spec:
+    devices:
+      requests:
+      - exactly:
+          allocationMode: ExactCount
+          capacity:
+            requests:
+              bandwidth: 9G
+          count: 1
+          deviceClassName: gpu.example.com
+          selectors:
+          - cel:
+              expression: device.attributes["gpu.example.com"].model == "NIC"
+        name: net
+  status: {}
+resourceSlices:
+- metadata:
+    name: worker-shared
+  spec:
+    devices:
+    - allowMultipleAllocations: true
+      attributes:
+        model:
+          string: NIC
+      capacity:
+        bandwidth:
+          requestPolicy:
+            default: 1G
+            validRange:
+              max: 8G
+              min: 1G
+              step: 1G
+          value: 10G
+      name: nic-0
+    driver: gpu.example.com
+    nodeName: worker
+    pool:
+      generation: 0
+      name: worker-shared
+      resourceSliceCount: 1

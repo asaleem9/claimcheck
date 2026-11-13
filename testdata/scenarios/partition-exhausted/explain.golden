@@ -13,7 +13,7 @@ Why
   request "gpu" in ml/full-gpu: needs 1, 0 usable (14 devices considered).
     selector #0 rejects 12 of 14 devices: device.attributes["gpu.example.com"].profile == "full"
         values seen: profile=quarter ×8 · profile=half ×4
-    2 of 14 devices match but their physical device has no capacity left: needs memory=80Gi of counter set gpu-0, 40Gi left; used by gpu-0-half-0 ×1 · needs memory=80Gi of counter set gpu-1, 60Gi left; used by gpu-1-quarter-2 ×1
+    2 of 14 devices match, but their physical device has no counters left: needs memory=80Gi of counter set gpu-0, 40Gi left; used by gpu-0-half-0 ×1 · needs memory=80Gi of counter set gpu-1, 60Gi left; used by gpu-1-quarter-2 ×1
 
 Devices on worker
   REQUEST   DEVICE                   RESULT               DETAIL

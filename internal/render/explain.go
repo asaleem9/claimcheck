@@ -250,6 +250,12 @@ func reasonLabel(d diagnose.Device) string {
 		return "counters used up"
 	case diagnose.PoolIncomplete:
 		return "pool incomplete"
+	case diagnose.CapacityUsedUp:
+		return "capacity used up"
+	case diagnose.CapacityNeverFits:
+		return "capacity never fits"
+	case diagnose.CapacityError:
+		return "capacity error"
 	}
 	return string(d.Reason)
 }

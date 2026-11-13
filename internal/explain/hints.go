@@ -164,11 +164,21 @@ func requestHints(v *requestView) []string {
 		if v.best != "" && v.bestAvail > 0 {
 			where = " on " + v.best + ", the closest node"
 		}
-		out = append(out, fmt.Sprintf("%s: %s%s (%d devices considered).", name, v.problem, where, total))
+		out = append(out, fmt.Sprintf("%s: %s%s (%s considered).", name, v.problem, where, plural(total, "device")))
 	}
 	for _, k := range bkeys {
 		b := buckets[k]
 		of := fmt.Sprintf("%d of %d devices", b.n, total)
+		if total == 1 {
+			of = "the only device"
+		}
+		// vb picks the verb form for the number of devices in the bucket.
+		vb := func(one, many string) string {
+			if b.n == 1 {
+				return one
+			}
+			return many
+		}
 		switch b.reason {
 		case diagnose.RequestSelector:
 			out = append(out, fmt.Sprintf("  selector #%d rejects %s: %s\n      values seen: %s", b.selector, of, b.expr, histogram(b.details)))
@@ -181,17 +191,23 @@ func requestHints(v *requestView) []string {
 			}
 			out = append(out, msg)
 		case diagnose.InUse:
-			out = append(out, fmt.Sprintf("  %s match but are already allocated: %s", of, histogram(trimPrefix(b.details, "allocated to "))))
+			out = append(out, fmt.Sprintf("  %s %s already allocated: %s", of, vb("matches but is", "match but are"), histogram(trimPrefix(b.details, "allocated to "))))
 		case diagnose.Tainted:
-			out = append(out, fmt.Sprintf("  %s match but are tainted: %s\n      add a matching toleration to the request, or remove the taint", of, histogram(b.details)))
+			out = append(out, fmt.Sprintf("  %s %s tainted: %s\n      add a matching toleration to the request, or remove the taint", of, vb("matches but is", "match but are"), histogram(b.details)))
+		case diagnose.CapacityUsedUp:
+			out = append(out, fmt.Sprintf("  %s %s, but other claims have used up %s shared capacity: %s", of, vb("matches", "match"), vb("its", "their"), histogram(b.details)))
+		case diagnose.CapacityNeverFits:
+			out = append(out, fmt.Sprintf("  %s can never give this request what it asks for: %s", of, histogram(b.details)))
+		case diagnose.CapacityError:
+			out = append(out, fmt.Sprintf("  computing capacity fails on %s: %s\n      the scheduler treats this as an error for the whole pod", of, firstKey(b.details)))
 		case diagnose.CountersExhausted:
-			out = append(out, fmt.Sprintf("  %s match but their physical device has no capacity left: %s", of, histogram(b.details)))
+			out = append(out, fmt.Sprintf("  %s %s, but %s physical device has no counters left: %s", of, vb("matches", "match"), vb("its", "their"), histogram(b.details)))
 		case diagnose.PoolIncomplete:
-			out = append(out, fmt.Sprintf("  %s are skipped because their pool is incomplete: %s", of, firstKey(b.details)))
+			out = append(out, fmt.Sprintf("  %s %s skipped because %s pool is incomplete: %s", of, vb("is", "are"), vb("its", "their"), firstKey(b.details)))
 		case diagnose.DeviceNode:
-			out = append(out, fmt.Sprintf("  %s are bound to other nodes by per-device node selection", of))
+			out = append(out, fmt.Sprintf("  %s %s bound to other nodes by per-device node selection", of, vb("is", "are")))
 		case diagnose.FeatureDisabled:
-			out = append(out, fmt.Sprintf("  %s need a feature gate that is off: %s (override with --features)", of, firstKey(b.details)))
+			out = append(out, fmt.Sprintf("  %s %s a feature gate that is off: %s (override with --features)", of, vb("needs", "need"), firstKey(b.details)))
 		}
 	}
 	if v.problem != "" && v.needed > 0 && usable >= v.needed && v.bestAvail < v.needed {

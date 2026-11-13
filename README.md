@@ -73,6 +73,12 @@ flowchart LR
 | Not enough devices / `allocationMode: All` | needed vs usable, per node |
 | Requests compete for the same devices | which requests, which devices |
 | `firstAvailable` alternatives all fail | each alternative's reason |
+| `matchAttribute` / `distinctAttribute` can't be met | the constraint, with usable devices grouped by value: `nvlink=domain-a: gpu-0 · nvlink=domain-b: gpu-2` |
+| A GPU partition's physical device is used up | the shared counter it needs, what's left, and which partitions hold it |
+| Partitions fit one at a time but not together | the counter set they exceed together |
+| A shared device's capacity is used up | what the request needs, what's left, and which claims share it |
+| A capacity request breaks the device's policy | the rounded value and the policy (`min 1G, max 8G, step 1G`) |
+| An `allocationMode: All` device breaks a constraint | that the allocator stops with an error instead of backtracking |
 | DeviceClass doesn't exist | the scheduler-level error |
 | It would fit, but on a node the pod can't use | the node and the `nodeSelector` or pinned claim that rules it out |
 | Driver not publishing devices | no devices visible for the class on any node |
@@ -118,15 +124,11 @@ make demo   # explains testdata/scenarios/all-in-use/snapshot.yaml
 
 claimcheck explains DRA allocation. It doesn't re-run every scheduler filter. Node eligibility covers `spec.nodeName`, `nodeSelector`, and claims already pinned to a node, but not affinity, taints on nodes, or resource fit.
 
-The diagnosis doesn't yet model the following. When they decide the outcome, claimcheck reports `UNEXPLAINED` rather than guessing:
+The diagnosis models the stable and beta parts of DRA in v1.37: selectors, taints, `firstAvailable`, constraints, partitionable devices and consumable capacity. It doesn't yet model these alpha features, and reports `UNEXPLAINED` when they decide the outcome:
 
-- `matchAttribute` and `distinctAttribute` constraints
-- consumable capacity
-- shared counters on partitionable devices
-- device compatibility groups
 - CEL-derived attributes
-
-These are next on the [roadmap](#roadmap).
+- list-typed attributes
+- device compatibility groups
 
 ## Development
 
@@ -145,7 +147,7 @@ Each scenario in `testdata/scenarios/` has a `snapshot.yaml` and its expected `e
 ## Roadmap
 
 - [x] `explain` for pods and claims, `snapshot`, offline `--from`
-- [ ] `matchAttribute` / `distinctAttribute`, consumable capacity and counters in the diagnosis
+- [x] `matchAttribute` / `distinctAttribute`, partitionable devices and shared counters, consumable capacity
 - [ ] `whatif`: would it fit if claim X were released, or with this claim instead?
 - [ ] `pools`: free, allocated and tainted devices and fragmentation per pool
 - [ ] `explain podgroup/…` for gang-scheduled workloads (Workload / PodGroup API, beta in v1.37)

@@ -44,6 +44,13 @@ const (
 	// PoolIncomplete: the device's pool doesn't have all its ResourceSlices
 	// yet, so the allocator skips the whole pool.
 	PoolIncomplete Reason = "PoolIncomplete"
+	// CapacityNeverFits: the request's capacity can't be met by this device
+	// even when it is idle (missing capacity, request policy, too large).
+	CapacityNeverFits Reason = "CapacityNeverFits"
+	// CapacityUsedUp: a shared device's remaining capacity is taken by other claims.
+	CapacityUsedUp Reason = "CapacityUsedUp"
+	// CapacityError: the allocator fails with an error computing capacity.
+	CapacityError Reason = "CapacityError"
 )
 
 // Device is one device's outcome for one request.
@@ -58,6 +65,9 @@ type Device struct {
 	// Detail is human-readable evidence: the attribute values the failing
 	// selector looked at, the claim holding the device, or the taint.
 	Detail string `json:"detail,omitempty"`
+
+	// share is what a usable shared device would give this request.
+	share map[resourceapi.QualifiedName]resource.Quantity
 }
 
 // ID returns the device's driver/pool/name triple.
@@ -222,7 +232,7 @@ func (d *Diagnoser) Diagnose(ctx context.Context, node *corev1.Node, claims []*r
 	}
 	if out.Fits {
 		var unknown bool
-		ctr := &solverCounters{left: d.counters().left, byID: byID}
+		ctr := &solverCounters{left: d.counters().left, byID: byID, diag: d}
 		out.Contention, out.CounterConflict, out.ConstraintFailure, unknown = resolve(out.Requests, cons, lookupValue(byID), ctr)
 		out.Fits = out.Contention == "" && out.CounterConflict == "" && out.ConstraintFailure == ""
 		if unknown {
@@ -238,10 +248,28 @@ func (d *Diagnoser) Diagnose(ctx context.Context, node *corev1.Node, claims []*r
 type solverCounters struct {
 	left map[counterKey]resource.Quantity
 	byID map[structured.DeviceID]*resourceapi.Device
+	diag *Diagnoser
 }
 
 func newSolver(reqs []Request, cons []constraintSpec, value valueFunc, ctr *solverCounters) *solver {
-	s := &solver{slots: buildSlots(reqs), cons: cons, value: value, budget: backtrackBudget, left: ctr.left}
+	s := &solver{slots: buildSlots(reqs), cons: cons, value: value, budget: backtrackBudget, left: ctr.left,
+		capInUse: ctr.diag.capacityInUse}
+	s.capLeft = func(id structured.DeviceID) map[resourceapi.QualifiedName]resource.Quantity {
+		left := map[resourceapi.QualifiedName]resource.Quantity{}
+		dev := ctr.byID[id]
+		if dev == nil {
+			return left
+		}
+		used := ctr.diag.consumedSoFar(id)
+		for name, c := range dev.Capacity {
+			v := c.Value.DeepCopy()
+			if u, ok := used[name]; ok {
+				v.Sub(u)
+			}
+			left[name] = v
+		}
+		return left
+	}
 	s.uses = func(id structured.DeviceID) []counterUse {
 		dev := ctr.byID[id]
 		if dev == nil {
@@ -450,14 +478,15 @@ type accessor struct {
 	count       int64
 	adminAccess bool
 	tolerations []resourceapi.DeviceToleration
+	capacity    *resourceapi.CapacityRequirements
 }
 
 func accessorFromExact(r *resourceapi.ExactDeviceRequest) accessor {
-	return accessor{r.DeviceClassName, r.Selectors, r.AllocationMode, r.Count, ptr.Deref(r.AdminAccess, false), r.Tolerations}
+	return accessor{r.DeviceClassName, r.Selectors, r.AllocationMode, r.Count, ptr.Deref(r.AdminAccess, false), r.Tolerations, r.Capacity}
 }
 
 func accessorFromSub(r *resourceapi.DeviceSubRequest) accessor {
-	return accessor{r.DeviceClassName, r.Selectors, r.AllocationMode, r.Count, false, r.Tolerations}
+	return accessor{r.DeviceClassName, r.Selectors, r.AllocationMode, r.Count, false, r.Tolerations, r.Capacity}
 }
 
 func (d *Diagnoser) request(ctx context.Context, claim, name string, a accessor, devices []candidate) Request {
@@ -470,6 +499,10 @@ func (d *Diagnoser) request(ctx context.Context, claim, name string, a accessor,
 	}
 	for _, s := range a.selectors {
 		r.Selectors = append(r.Selectors, s.CEL.Expression)
+	}
+	if a.capacity != nil && !d.Features.ConsumableCapacity {
+		r.Problem, r.Fatal = "has capacity requests, but the DRAConsumableCapacity feature is disabled", true
+		return r
 	}
 	class, err := d.Classes.Get(a.class)
 	if err != nil {
@@ -492,11 +525,14 @@ func (d *Diagnoser) request(ctx context.Context, claim, name string, a accessor,
 	selectable := 0
 	for _, c := range devices {
 		dev := d.device(ctx, c, class, a)
-		if dev.Reason == Available || dev.Reason == InUse || dev.Reason == Tainted || dev.Reason == FeatureDisabled || dev.Reason == CountersExhausted {
+		if dev.Reason == Available || dev.Reason == InUse || dev.Reason == Tainted || dev.Reason == FeatureDisabled || dev.Reason == CountersExhausted || dev.Reason == CapacityUsedUp {
 			selectable++
 		}
 		if dev.Reason == Available {
 			r.Available++
+		}
+		if dev.Reason == CapacityError {
+			r.Fatal = true
 		}
 		r.Devices = append(r.Devices, dev)
 	}
@@ -547,8 +583,23 @@ func (d *Diagnoser) device(ctx context.Context, c candidate, class *resourceapi.
 		return out
 	}
 
+	// Capacity that can't fit even on an idle device. The allocator leaves
+	// such devices out of allocationMode All entirely, so check it first.
+	if d.Features.ConsumableCapacity {
+		ok, why, err := capacityCheck(nil, a.capacity, dev.Capacity, d.Features.FractionalCapacityRange)
+		switch {
+		case err != nil:
+			out.Reason, out.Detail = CapacityError, err.Error()
+			return out
+		case !ok:
+			out.Reason, out.Detail = CapacityNeverFits, why
+			return out
+		}
+	}
 	shareable := d.Features.ConsumableCapacity && ptr.Deref(dev.AllowMultipleAllocations, false)
-	if !a.adminAccess && !shareable && structured.IsDeviceAllocated(id, &d.Allocated) {
+	// Like the allocator, only exclusive allocations make a device "in use";
+	// shared ones consume capacity instead.
+	if !a.adminAccess && d.Allocated.AllocatedDevices.Has(id) {
 		out.Reason = InUse
 		var owners []string
 		for _, o := range d.Owners[id] {
@@ -556,6 +607,19 @@ func (d *Diagnoser) device(ctx context.Context, c candidate, class *resourceapi.
 		}
 		out.Detail = "allocated to " + strings.Join(owners, ", ")
 		return out
+	}
+	if d.Features.ConsumableCapacity {
+		if ok, why, _ := capacityCheck(d.consumedSoFar(id), a.capacity, dev.Capacity, d.Features.FractionalCapacityRange); !ok {
+			out.Reason, out.Detail = CapacityUsedUp, why
+			var owners []string
+			for _, o := range d.Owners[id] {
+				owners = append(owners, o.String())
+			}
+			if len(owners) > 0 {
+				out.Detail += "; shared with " + strings.Join(owners, ", ")
+			}
+			return out
+		}
 	}
 	if len(c.slice.Spec.SkipNodeOperations) > 0 && !d.Features.OptionalNodeOperations {
 		out.Reason, out.Detail = FeatureDisabled, "slice skips node operations but DRAOptionalNodeOperations is disabled"
@@ -565,7 +629,8 @@ func (d *Diagnoser) device(ctx context.Context, c candidate, class *resourceapi.
 		out.Reason, out.Detail = FeatureDisabled, "device consumes counters but DRAPartitionableDevices is disabled"
 		return out
 	}
-	if len(dev.ConsumesCounters) > 0 {
+	countersCharged := shareable && d.capacityInUse(id) // an earlier share already paid them
+	if len(dev.ConsumesCounters) > 0 && !countersCharged {
 		if short := d.counterShortfall(out.Driver, out.Pool, dev); short != "" {
 			out.Reason, out.Detail = CountersExhausted, short
 			return out
@@ -589,7 +654,24 @@ func (d *Diagnoser) device(ctx context.Context, c candidate, class *resourceapi.
 		}
 	}
 	out.Reason = Available
+	if shareable {
+		out.share, _ = consumption(a.capacity, dev.Capacity, d.Features.FractionalCapacityRange)
+	}
 	return out
+}
+
+// capacityInUse mirrors deviceCapacityInUse: a shared device whose counters
+// were already charged by an earlier shared allocation.
+func (d *Diagnoser) capacityInUse(id structured.DeviceID) bool {
+	if _, ok := d.Allocated.AggregatedCapacity[id]; ok {
+		return true
+	}
+	for sid := range d.Allocated.AllocatedSharedDeviceIDs {
+		if sid.GetDeviceID() == id {
+			return true
+		}
+	}
+	return false
 }
 
 // selectors evaluates CEL selectors in order and reports the first that

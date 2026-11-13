@@ -1,0 +1,19 @@
+
+pod ml/trainer  (Pending)
+
+ FITS   The claims can be allocated on 1 of 1 eligible node.
+
+Claims
+  net   pending   
+
+Nodes (allocator verdict · why)
+  worker   ✓ fits   ingest→nic-0, sync→nic-0
+
+Notes
+  • the pod is Pending even though DRA would fit; check other scheduling constraints or whether the scheduler has retried since the cluster changed
+
+Devices on worker
+  REQUEST   DEVICE                RESULT     DETAIL
+  ingest    worker-shared/nic-0   ✓ usable   
+  sync      worker-shared/nic-0   ✓ usable   
+
