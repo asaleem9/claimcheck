@@ -1,0 +1,28 @@
+
+pod ml/tp-train  (Pending)
+
+ BLOCKED   No eligible node can allocate the claims (1 node checked).
+
+Claims
+  nvlinked   pending   
+
+Nodes (allocator verdict · why)
+  worker   ✗   matchAttribute example.com/fabric can't be satisfied
+
+Why
+  On worker the requests can get enough devices, but not ones that satisfy the claim's constraints:
+      matchAttribute example.com/fabric on "a" and "b" needs 2 devices that share a value; fabric is derived per request
+      "a" computes fabric=fabric-H100: gpu-0, gpu-1, gpu-2, gpu-3
+      "b" computes fabric=domain-b: gpu-1, gpu-2 · fabric=domain-a: gpu-0 · fabric=none: gpu-3
+
+Devices on worker
+  REQUEST   DEVICE         RESULT     DETAIL
+  a         worker/gpu-0   ✓ usable   
+  a         worker/gpu-1   ✓ usable   
+  a         worker/gpu-2   ✓ usable   
+  a         worker/gpu-3   ✓ usable   
+  b         worker/gpu-0   ✓ usable   
+  b         worker/gpu-1   ✓ usable   
+  b         worker/gpu-2   ✓ usable   
+  b         worker/gpu-3   ✓ usable   
+

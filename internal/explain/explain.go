@@ -222,7 +222,7 @@ func run(ctx context.Context, snap *snapshot.Snapshot, rep *Report, pod *corev1.
 		}
 		switch {
 		case nr.Verdict.Err != "":
-			nr.Agree = hasFatal(nr.Diagnosis) || IsConstraintError(nr.Verdict.Err)
+			nr.Agree = hasFatal(nr.Diagnosis) || IsConstraintError(nr.Verdict.Err) || IsDerivedError(nr.Verdict.Err)
 		case nr.Verdict.NodeReason != "":
 			nr.Agree = true
 		default:
@@ -311,6 +311,12 @@ func excluded(f structured.Features, pod *corev1.Pod, allocated []*resourceapi.R
 // doesn't backtrack in that case, so the error itself is the explanation.
 func IsConstraintError(err string) bool {
 	return strings.Contains(err, "because a claim constraint would not be satisfied")
+}
+
+// IsDerivedError recognizes the allocator's error when a CEL-derived
+// attribute fails to evaluate on a device it tries for a constraint.
+func IsDerivedError(err string) bool {
+	return strings.Contains(err, "evaluate derived attribute") || strings.Contains(err, "compile derived attribute")
 }
 
 // hasReason reports whether the diagnosis found a concrete reason the

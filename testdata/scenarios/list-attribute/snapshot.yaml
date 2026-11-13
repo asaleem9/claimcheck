@@ -1,0 +1,104 @@
+apiVersion: claimcheck.dev/v1alpha1
+deviceClasses:
+- metadata:
+    name: gpu.example.com
+  spec:
+    selectors:
+    - cel:
+        expression: device.driver == "gpu.example.com"
+kind: Snapshot
+metadata:
+  capturedAt: null
+nodes:
+- metadata:
+    labels:
+      kubernetes.io/hostname: worker
+    name: worker
+  spec: {}
+  status:
+    daemonEndpoints:
+      kubeletEndpoint:
+        Port: 0
+    nodeInfo:
+      architecture: ""
+      bootID: ""
+      containerRuntimeVersion: ""
+      kernelVersion: ""
+      kubeProxyVersion: ""
+      kubeletVersion: ""
+      machineID: ""
+      operatingSystem: ""
+      osImage: ""
+      systemUUID: ""
+pods:
+- metadata:
+    name: tp-train
+    namespace: ml
+    uid: uid-pod-tp-train
+  spec:
+    containers: null
+    resourceClaims:
+    - name: linked
+      resourceClaimName: linked
+  status:
+    phase: Pending
+resourceClaims:
+- metadata:
+    name: linked
+    namespace: ml
+    uid: uid-ml-linked
+  spec:
+    devices:
+      constraints:
+      - matchAttribute: gpu.example.com/links
+      requests:
+      - exactly:
+          allocationMode: ExactCount
+          count: 3
+          deviceClassName: gpu.example.com
+        name: gpus
+  status: {}
+resourceSlices:
+- metadata:
+    name: worker-gpu.example.com
+  spec:
+    devices:
+    - attributes:
+        links:
+          strings:
+          - a
+          - b
+        model:
+          string: H100
+      capacity:
+        memory:
+          value: 80Gi
+      name: gpu-0
+    - attributes:
+        links:
+          strings:
+          - b
+          - c
+        model:
+          string: H100
+      capacity:
+        memory:
+          value: 80Gi
+      name: gpu-1
+    - attributes:
+        links:
+          strings:
+          - c
+          - d
+        model:
+          string: H100
+      capacity:
+        memory:
+          value: 80Gi
+      name: gpu-2
+    driver: gpu.example.com
+    nodeName: worker
+    pool:
+      generation: 0
+      name: worker
+      resourceSliceCount: 1

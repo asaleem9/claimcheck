@@ -1,0 +1,22 @@
+
+pod ml/tp-train  (Pending)
+
+ BLOCKED   No eligible node can allocate the claims (1 node checked).
+
+Claims
+  linked   pending   
+
+Nodes (allocator verdict · why)
+  worker   ✗   matchAttribute gpu.example.com/links can't be satisfied
+
+Why
+  On worker the requests can get enough devices, but not ones that satisfy the claim's constraints:
+      matchAttribute gpu.example.com/links on "gpus" needs 3 devices that share a value; the most any value has is 2
+      usable: links=b: gpu-0, gpu-1 · links=c: gpu-1, gpu-2 · links=a: gpu-0 · 1 more value
+
+Devices on worker
+  REQUEST   DEVICE         RESULT     DETAIL
+  gpus      worker/gpu-0   ✓ usable   
+  gpus      worker/gpu-1   ✓ usable   
+  gpus      worker/gpu-2   ✓ usable   
+

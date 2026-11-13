@@ -76,6 +76,9 @@ func hints(rep *Report) []string {
 				add(n, alt)
 			}
 		}
+		if n.Excluded == "" && IsDerivedError(n.Verdict.Err) && constraintErr == "" {
+			constraintErr = fmt.Sprintf("A CEL-derived attribute fails to evaluate on %s, and the allocator stops with an error:\n    %s\n    guard optional attributes in the derived expression with has(...) or .?attr.orValue(...)", n.Node, diagnose.ShortCELError(n.Verdict.Err))
+		}
 		if n.Excluded == "" && IsConstraintError(n.Verdict.Err) && constraintErr == "" {
 			constraintErr = fmt.Sprintf("The allocator stops with an error on %s instead of trying other devices: a device for an allocationMode: All request breaks one of the claim's constraints.\n    All-mode requests take every matching device, so each of them must satisfy the claim's matchAttribute/distinctAttribute constraints.", n.Node)
 		}

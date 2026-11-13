@@ -168,7 +168,7 @@ var scenarios = []scenario{
 		status: explain.Blocked,
 	},
 	{
-		name: "derived-attribute-unexplained",
+		name: "derived-attribute",
 		build: func() *tu.B {
 			return nvlinkNode().Claim("ml", "nvlinked", tu.Req{Name: "a", Derived: map[string]string{"example.com/fabric": `"fabric-" + device.attributes["gpu.example.com"].model`}},
 				tu.Req{Name: "b", Derived: map[string]string{"example.com/fabric": `device.attributes["gpu.example.com"].?nvlink.orValue("none")`}}).
@@ -176,7 +176,7 @@ var scenarios = []scenario{
 				Pod("ml", "tp-train", nil, "nvlinked")
 		},
 		features: "DRADerivedAttributes=true",
-		status:   explain.Unexplained,
+		status:   explain.Blocked,
 	},
 	{
 		name: "partition-exhausted",
@@ -211,6 +211,21 @@ var scenarios = []scenario{
 				Pod("ml", "train", nil, "two-halves")
 		},
 		status: explain.Fits,
+	},
+	{
+		name: "list-attribute",
+		build: func() *tu.B {
+			b := tu.New().Node("worker", nil).GPUClass().Slice("worker",
+				tu.GPU{Name: "gpu-0", Model: "H100", Memory: "80Gi", Lists: map[string][]string{"links": {"a", "b"}}},
+				tu.GPU{Name: "gpu-1", Model: "H100", Memory: "80Gi", Lists: map[string][]string{"links": {"b", "c"}}},
+				tu.GPU{Name: "gpu-2", Model: "H100", Memory: "80Gi", Lists: map[string][]string{"links": {"c", "d"}}},
+			)
+			return b.Claim("ml", "linked", tu.Req{Name: "gpus", Count: 3}).
+				MatchAttribute("gpu.example.com/links").
+				Pod("ml", "tp-train", nil, "linked")
+		},
+		features: "DRAListTypeAttributes=true",
+		status:   explain.Blocked,
 	},
 	{
 		name: "shared-capacity-used-up",

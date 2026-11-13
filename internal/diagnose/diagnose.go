@@ -99,7 +99,9 @@ type Request struct {
 	// Alternatives holds firstAvailable subrequests in priority order;
 	// Chosen is the first satisfiable one, or -1.
 	Alternatives []Request `json:"alternatives,omitempty"`
-	Chosen       int       `json:"chosen,omitempty"`
+	// derived holds the request's CEL-derived attributes for constraints.
+	derived map[resourceapi.FullyQualifiedName]string
+	Chosen  int `json:"chosen,omitempty"`
 }
 
 // Node is the diagnosis for one node.
@@ -233,7 +235,7 @@ func (d *Diagnoser) Diagnose(ctx context.Context, node *corev1.Node, claims []*r
 	if out.Fits {
 		var unknown bool
 		ctr := &solverCounters{left: d.counters().left, byID: byID, diag: d}
-		out.Contention, out.CounterConflict, out.ConstraintFailure, unknown = resolve(out.Requests, cons, lookupValue(byID), ctr)
+		out.Contention, out.CounterConflict, out.ConstraintFailure, unknown = resolve(out.Requests, cons, lookupValue(ctx, byID, d.CEL, d.Features.ListTypeAttributes), ctr)
 		out.Fits = out.Contention == "" && out.CounterConflict == "" && out.ConstraintFailure == ""
 		if unknown {
 			out.Fits = false
@@ -293,11 +295,6 @@ func unmodeled(claim *resourceapi.ResourceClaim, c constraintSpec) string {
 		}
 		if c.requests.Len() > 0 && !c.requests.Has(r.Name) {
 			continue
-		}
-		for _, da := range derived {
-			if da.Name == c.attr {
-				return "uses a CEL-derived attribute"
-			}
 		}
 		if admin {
 			return "applies to an adminAccess request"
@@ -479,14 +476,15 @@ type accessor struct {
 	adminAccess bool
 	tolerations []resourceapi.DeviceToleration
 	capacity    *resourceapi.CapacityRequirements
+	derived     []resourceapi.DeviceDerivedAttribute
 }
 
 func accessorFromExact(r *resourceapi.ExactDeviceRequest) accessor {
-	return accessor{r.DeviceClassName, r.Selectors, r.AllocationMode, r.Count, ptr.Deref(r.AdminAccess, false), r.Tolerations, r.Capacity}
+	return accessor{r.DeviceClassName, r.Selectors, r.AllocationMode, r.Count, ptr.Deref(r.AdminAccess, false), r.Tolerations, r.Capacity, r.DerivedAttributes}
 }
 
 func accessorFromSub(r *resourceapi.DeviceSubRequest) accessor {
-	return accessor{r.DeviceClassName, r.Selectors, r.AllocationMode, r.Count, false, r.Tolerations, r.Capacity}
+	return accessor{r.DeviceClassName, r.Selectors, r.AllocationMode, r.Count, false, r.Tolerations, r.Capacity, r.DerivedAttributes}
 }
 
 func (d *Diagnoser) request(ctx context.Context, claim, name string, a accessor, devices []candidate) Request {
@@ -499,6 +497,16 @@ func (d *Diagnoser) request(ctx context.Context, claim, name string, a accessor,
 	}
 	for _, s := range a.selectors {
 		r.Selectors = append(r.Selectors, s.CEL.Expression)
+	}
+	if len(a.derived) > 0 {
+		if !d.Features.DerivedAttributes {
+			r.Problem, r.Fatal = "has derived attributes, but the DRADerivedAttributes feature is disabled", true
+			return r
+		}
+		r.derived = map[resourceapi.FullyQualifiedName]string{}
+		for _, da := range a.derived {
+			r.derived[da.Name] = da.Expression
+		}
 	}
 	if a.capacity != nil && !d.Features.ConsumableCapacity {
 		r.Problem, r.Fatal = "has capacity requests, but the DRAConsumableCapacity feature is disabled", true

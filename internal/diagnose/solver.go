@@ -1,6 +1,7 @@
 package diagnose
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 	resourceapi "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/dynamic-resource-allocation/cel"
 	"k8s.io/dynamic-resource-allocation/structured"
 )
 
@@ -23,6 +25,8 @@ type slot struct {
 	// share holds, for shared (allowMultipleAllocations) devices, the
 	// capacity this request would take from them.
 	share map[structured.DeviceID]map[resourceapi.QualifiedName]resource.Quantity
+	// derived maps derived attribute names of the slot's request to CEL.
+	derived map[resourceapi.FullyQualifiedName]string
 }
 
 // constraintSpec is a claim's matchAttribute or distinctAttribute constraint.
@@ -58,43 +62,120 @@ type valueState int
 const (
 	valueSet valueState = iota
 	valueUnset
-	valueUnsupported // list-typed attributes, which the solver doesn't model
+	// valueError: evaluating a derived attribute failed; the allocator
+	// stops with an error when it reaches such a device.
+	valueError
 )
 
-// valueFunc looks up a device attribute the way the allocator does for
-// constraints and returns a comparable key and a display string.
-type valueFunc func(id structured.DeviceID, attr resourceapi.FullyQualifiedName) (key, display string, state valueState)
+// value is an attribute's value as a set of typed keys ("s:a", "i:3"):
+// one element for scalars, several for list-typed attributes. Keys of
+// different types never compare equal, like in the allocator.
+type value struct {
+	keys    []string
+	display []string
+	state   valueState
+	err     string
+}
 
-func lookupValue(devs map[structured.DeviceID]*resourceapi.Device) valueFunc {
-	return func(id structured.DeviceID, attr resourceapi.FullyQualifiedName) (string, string, valueState) {
+// valueFunc looks up an attribute for a device in the context of one slot,
+// whose request may define it as a CEL-derived attribute.
+type valueFunc func(sl slot, id structured.DeviceID, attr resourceapi.FullyQualifiedName) value
+
+func lookupValue(ctx context.Context, devs map[structured.DeviceID]*resourceapi.Device, cache *cel.Cache, listTypes bool) valueFunc {
+	derived := map[string]value{}
+	return func(sl slot, id structured.DeviceID, attr resourceapi.FullyQualifiedName) value {
 		dev := devs[id]
 		if dev == nil {
-			return "", "", valueUnset
+			return value{state: valueUnset}
+		}
+		if expr, ok := sl.derived[attr]; ok {
+			k := id.String() + "\x00" + expr
+			if v, ok := derived[k]; ok {
+				return v
+			}
+			v := evalDerived(ctx, cache, id, dev, expr, listTypes)
+			derived[k] = v
+			return v
 		}
 		a, ok := dev.Attributes[resourceapi.QualifiedName(attr)]
 		if !ok {
 			domain, name, found := strings.Cut(string(attr), "/")
 			if !found || domain != id.Driver.String() {
-				return "", "", valueUnset
+				return value{state: valueUnset}
 			}
 			if a, ok = dev.Attributes[resourceapi.QualifiedName(name)]; !ok {
-				return "", "", valueUnset
+				return value{state: valueUnset}
 			}
 		}
-		switch {
-		case a.StringValue != nil:
-			return "s:" + *a.StringValue, *a.StringValue, valueSet
-		case a.IntValue != nil:
-			v := strconv.FormatInt(*a.IntValue, 10)
-			return "i:" + v, v, valueSet
-		case a.BoolValue != nil:
-			v := strconv.FormatBool(*a.BoolValue)
-			return "b:" + v, v, valueSet
-		case a.VersionValue != nil:
-			return "v:" + *a.VersionValue, *a.VersionValue, valueSet
-		}
-		return "", "", valueUnsupported
+		return typedValue(a, listTypes)
 	}
+}
+
+func evalDerived(ctx context.Context, cache *cel.Cache, id structured.DeviceID, dev *resourceapi.Device, expr string, listTypes bool) value {
+	c := cache.GetOrCompileDerivedAttribute(expr)
+	if c.Error != nil {
+		return value{state: valueError, err: "compile derived attribute: " + c.Error.Error()}
+	}
+	attr, _, err := c.EvaluateDerivedAttribute(ctx, cel.Device{
+		Driver: id.Driver.String(), AllowMultipleAllocations: dev.AllowMultipleAllocations,
+		Attributes: dev.Attributes, Capacity: dev.Capacity,
+	})
+	if err != nil {
+		return value{state: valueError, err: ShortCELError(cel.EnhanceRuntimeError(err).Error())}
+	}
+	if attr == nil {
+		return value{state: valueUnset}
+	}
+	return typedValue(*attr, listTypes)
+}
+
+// typedValue converts an attribute to a typed set. Without the
+// list-type feature, list values can't satisfy a constraint, like in the
+// allocator, so they count as unset.
+func typedValue(a resourceapi.DeviceAttribute, listTypes bool) value {
+	var v value
+	add := func(prefix, s string) {
+		v.keys = append(v.keys, prefix+s)
+		v.display = append(v.display, s)
+	}
+	switch {
+	case listTypes && len(a.IntValues) > 0:
+		for _, x := range a.IntValues {
+			add("i:", strconv.FormatInt(x, 10))
+		}
+	case listTypes && len(a.BoolValues) > 0:
+		for _, x := range a.BoolValues {
+			add("b:", strconv.FormatBool(x))
+		}
+	case listTypes && len(a.StringValues) > 0:
+		for _, x := range a.StringValues {
+			add("s:", x)
+		}
+	case listTypes && len(a.VersionValues) > 0:
+		for _, x := range a.VersionValues {
+			add("v:", x)
+		}
+	case a.StringValue != nil:
+		add("s:", *a.StringValue)
+	case a.IntValue != nil:
+		add("i:", strconv.FormatInt(*a.IntValue, 10))
+	case a.BoolValue != nil:
+		add("b:", strconv.FormatBool(*a.BoolValue))
+	case a.VersionValue != nil:
+		add("v:", *a.VersionValue)
+	default:
+		return value{state: valueUnset}
+	}
+	return v
+}
+
+func (v value) has(key string) bool {
+	for _, k := range v.keys {
+		if k == key {
+			return true
+		}
+	}
+	return false
 }
 
 // solver decides whether slots can get distinct devices that satisfy all
@@ -171,12 +252,8 @@ func (s *solver) solve(cons []constraintSpec) (ok, unknown bool) {
 				continue
 			}
 			for _, id := range sl.options {
-				key, _, st := s.value(id, m.attr)
-				switch st {
-				case valueUnsupported:
-					return false, true
-				case valueSet:
-					seen.Insert(key)
+				if v := s.value(sl, id, m.attr); v.state == valueSet {
+					seen.Insert(v.keys...)
 				}
 			}
 		}
@@ -238,18 +315,14 @@ func (s *solver) anyApplies(c constraintSpec) bool {
 func (s *solver) restrict(match []constraintSpec, values [][]string, pos []int, distinct []constraintSpec) []slot {
 	out := make([]slot, len(s.slots))
 	for i, sl := range s.slots {
-		out[i] = slot{claim: sl.claim, request: sl.request, interchangeable: sl.interchangeable, share: sl.share}
+		out[i] = slot{claim: sl.claim, request: sl.request, interchangeable: sl.interchangeable, share: sl.share, derived: sl.derived}
 	options:
 		for _, id := range sl.options {
 			for j, m := range match {
 				if !m.applies(sl) {
 					continue
 				}
-				key, _, st := s.value(id, m.attr)
-				if st == valueUnsupported {
-					return nil
-				}
-				if st != valueSet || key != values[j][pos[j]] {
+				if v := s.value(sl, id, m.attr); v.state != valueSet || !v.has(values[j][pos[j]]) {
 					continue options
 				}
 			}
@@ -257,11 +330,7 @@ func (s *solver) restrict(match []constraintSpec, values [][]string, pos []int, 
 				if !d.applies(sl) {
 					continue
 				}
-				_, _, st := s.value(id, d.attr)
-				if st == valueUnsupported {
-					return nil
-				}
-				if st != valueSet {
+				if s.value(sl, id, d.attr).state != valueSet {
 					continue options
 				}
 			}
@@ -333,16 +402,16 @@ func (s *solver) backtrack(slots []slot, distinct []constraintSpec) (found, exha
 			} else if used.Has(id) {
 				continue
 			}
-			var keys []string
+			// distinctAttribute: the device's values must be disjoint from
+			// those of the devices already chosen under the constraint.
+			keys := make([][]string, len(distinct))
 			for j, d := range distinct {
-				key := ""
 				if d.applies(sl) {
-					key, _, _ = s.value(id, d.attr)
-					if taken[j].Has(key) {
+					keys[j] = s.value(sl, id, d.attr).keys
+					if taken[j].HasAny(keys[j]...) {
 						continue options
 					}
 				}
-				keys = append(keys, key)
 			}
 			var us []counterUse
 			countersCharged := shared && (shares[id] > 0 || s.capInUse(id)) // charged once per shared device
@@ -368,10 +437,8 @@ func (s *solver) backtrack(slots []slot, distinct []constraintSpec) (found, exha
 			} else {
 				used.Insert(id)
 			}
-			for j, key := range keys {
-				if key != "" {
-					taken[j].Insert(key)
-				}
+			for j := range keys {
+				taken[j].Insert(keys[j]...)
 			}
 			for _, u := range us {
 				if l, ok := left[u.key]; ok {
@@ -394,10 +461,8 @@ func (s *solver) backtrack(slots []slot, distinct []constraintSpec) (found, exha
 			} else {
 				used.Delete(id)
 			}
-			for j, key := range keys {
-				if key != "" {
-					taken[j].Delete(key)
-				}
+			for j := range keys {
+				taken[j].Delete(keys[j]...)
 			}
 			for _, u := range us {
 				if l, ok := left[u.key]; ok {
@@ -476,69 +541,126 @@ func (s *solver) describe(c constraintSpec) string {
 	var reqs []string
 	seenReq := sets.New[string]()
 	need := 0
-	opts := sets.New[structured.DeviceID]()
+	derived := false
 	for _, sl := range s.slots {
 		if !c.applies(sl) {
 			continue
 		}
 		need++
+		if _, ok := sl.derived[c.attr]; ok {
+			derived = true
+		}
 		if !seenReq.Has(sl.request) {
 			seenReq.Insert(sl.request)
 			reqs = append(reqs, strconv.Quote(sl.request))
 		}
-		opts.Insert(sl.options...)
 	}
-	groups := map[string][]string{}
-	var unset []string
-	for id := range opts {
-		_, display, st := s.value(id, c.attr)
-		if st != valueSet {
-			unset = append(unset, id.Device.String())
-			continue
+	verb := "that share a value"
+	if c.distinct {
+		verb = "with no value in common"
+	}
+	head := fmt.Sprintf("%s %s on %s needs %d devices %s", c.kind(), c.attr, strings.Join(reqs, " and "), need, verb)
+
+	if derived {
+		// A derived attribute can give the same device a different value
+		// for each request, so show each request's view.
+		var lines []string
+		for _, r := range reqs {
+			name, _ := strconv.Unquote(r)
+			var sl slot
+			for _, x := range s.slots {
+				if c.applies(x) && x.request == name {
+					sl = x
+					break
+				}
+			}
+			gs, unset, errs := s.groups(c, []slot{sl})
+			lines = append(lines, fmt.Sprintf("%s computes %s", r, formatGroups(c, gs, unset, errs)))
 		}
-		groups[display] = append(groups[display], id.Device.String())
+		return fmt.Sprintf("%s; %s is derived per request\n    %s", head, attrName(c.attr), strings.Join(lines, "\n    "))
 	}
-	type group struct {
-		value string
-		devs  []string
-	}
-	var gs []group
-	for v, ds := range groups {
-		sort.Slice(ds, func(i, j int) bool { return naturalLess(ds[i], ds[j]) })
-		gs = append(gs, group{v, ds})
-	}
-	// Largest groups first: for matchAttribute the biggest group is how
-	// close the claim gets.
-	sort.Slice(gs, func(i, j int) bool {
-		if len(gs[i].devs) != len(gs[j].devs) {
-			return len(gs[i].devs) > len(gs[j].devs)
+
+	var applicable []slot
+	for _, sl := range s.slots {
+		if c.applies(sl) {
+			applicable = append(applicable, sl)
 		}
-		return naturalLess(gs[i].value, gs[j].value)
-	})
-	const shown = 3
-	var parts []string
-	for i, g := range gs {
-		if i == shown {
-			parts = append(parts, fmt.Sprintf("%d more values", len(gs)-shown))
-			break
-		}
-		parts = append(parts, fmt.Sprintf("%s=%s: %s", attrName(c.attr), g.value, strings.Join(g.devs, ", ")))
 	}
-	if len(unset) > 0 {
-		sort.Slice(unset, func(i, j int) bool { return naturalLess(unset[i], unset[j]) })
-		parts = append(parts, "not set: "+strings.Join(unset, ", "))
-	}
-	head := fmt.Sprintf("%s %s on %s needs %d devices with the same value", c.kind(), c.attr, strings.Join(reqs, " and "), need)
+	gs, unset, errs := s.groups(c, applicable)
 	most := 0
 	if len(gs) > 0 {
 		most = len(gs[0].devs)
 	}
 	summary := fmt.Sprintf("the most any value has is %d", most)
 	if c.distinct {
-		head = fmt.Sprintf("%s %s on %s needs %d devices with different values", c.kind(), c.attr, strings.Join(reqs, " and "), need)
 		summary = fmt.Sprintf("usable devices have only %d distinct values", len(gs))
 	}
-	return fmt.Sprintf("%s; %s\n    usable: %s", head, summary, strings.Join(parts, " · "))
+	return fmt.Sprintf("%s; %s\n    usable: %s", head, summary, formatGroups(c, gs, unset, errs))
+}
+
+type valueGroup struct {
+	value string
+	devs  []string
+}
+
+// groups collects the usable devices of slots by attribute value (a device
+// with a list value appears under each element), largest group first.
+func (s *solver) groups(c constraintSpec, slots []slot) (gs []valueGroup, unset, errs []string) {
+	byValue := map[string][]string{}
+	seen := sets.New[structured.DeviceID]()
+	for _, sl := range slots {
+		for _, id := range sl.options {
+			if seen.Has(id) {
+				continue
+			}
+			seen.Insert(id)
+			v := s.value(sl, id, c.attr)
+			switch v.state {
+			case valueError:
+				errs = append(errs, id.Device.String()+" ("+v.err+")")
+				continue
+			case valueUnset:
+				unset = append(unset, id.Device.String())
+				continue
+			}
+			for _, d := range v.display {
+				byValue[d] = append(byValue[d], id.Device.String())
+			}
+		}
+	}
+	for v, ds := range byValue {
+		sort.Slice(ds, func(i, j int) bool { return naturalLess(ds[i], ds[j]) })
+		gs = append(gs, valueGroup{v, ds})
+	}
+	sort.Slice(gs, func(i, j int) bool {
+		if len(gs[i].devs) != len(gs[j].devs) {
+			return len(gs[i].devs) > len(gs[j].devs)
+		}
+		return naturalLess(gs[i].value, gs[j].value)
+	})
+	sort.Slice(unset, func(i, j int) bool { return naturalLess(unset[i], unset[j]) })
+	sort.Strings(errs)
+	return gs, unset, errs
+}
+
+func formatGroups(c constraintSpec, gs []valueGroup, unset, errs []string) string {
+	const shown = 3
+	var parts []string
+	for i, g := range gs {
+		if i == shown {
+			more := len(gs) - shown
+			parts = append(parts, fmt.Sprintf("%d more value%s", more, map[bool]string{true: "", false: "s"}[more == 1]))
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%s=%s: %s", attrName(c.attr), g.value, strings.Join(g.devs, ", ")))
+	}
+	if len(unset) > 0 {
+		parts = append(parts, "not set: "+strings.Join(unset, ", "))
+	}
+	if len(errs) > 0 {
+		parts = append(parts, "error: "+strings.Join(errs, ", "))
+	}
+	return strings.Join(parts, " · ")
 }
 
 // counterMessage explains that the candidate partitions can't all be
@@ -637,12 +759,12 @@ func buildSlots(reqs []Request) []slot {
 		}
 		if r.Mode == resourceapi.DeviceAllocationModeAll {
 			for _, id := range usable {
-				slots = append(slots, slot{claim: r.Claim, request: r.Name, options: []structured.DeviceID{id}, share: share})
+				slots = append(slots, slot{claim: r.Claim, request: r.Name, options: []structured.DeviceID{id}, share: share, derived: r.derived})
 			}
 			continue
 		}
 		for range r.Needed {
-			slots = append(slots, slot{claim: r.Claim, request: r.Name, options: usable, interchangeable: true, share: share})
+			slots = append(slots, slot{claim: r.Claim, request: r.Name, options: usable, interchangeable: true, share: share, derived: r.derived})
 		}
 	}
 	return slots

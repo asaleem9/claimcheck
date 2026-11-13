@@ -77,6 +77,22 @@ func FormatAttribute(a resourceapi.DeviceAttribute) string {
 		return *a.StringValue
 	case a.VersionValue != nil:
 		return *a.VersionValue
+	case len(a.StringValues) > 0:
+		return "[" + strings.Join(a.StringValues, ",") + "]"
+	case len(a.VersionValues) > 0:
+		return "[" + strings.Join(a.VersionValues, ",") + "]"
+	case len(a.IntValues) > 0:
+		parts := make([]string, len(a.IntValues))
+		for i, v := range a.IntValues {
+			parts[i] = fmt.Sprint(v)
+		}
+		return "[" + strings.Join(parts, ",") + "]"
+	case len(a.BoolValues) > 0:
+		parts := make([]string, len(a.BoolValues))
+		for i, v := range a.BoolValues {
+			parts[i] = fmt.Sprint(v)
+		}
+		return "[" + strings.Join(parts, ",") + "]"
 	}
 	return "<unsupported type>"
 }

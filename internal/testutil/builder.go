@@ -23,7 +23,8 @@ type GPU struct {
 	Name   string
 	Model  string
 	Memory string
-	Extra  map[string]string // extra string attributes
+	Extra  map[string]string   // extra string attributes
+	Lists  map[string][]string // list-typed string attributes (alpha)
 	Taints []resourceapi.DeviceTaint
 }
 
@@ -81,6 +82,9 @@ func (b *B) Slice(node string, gpus ...GPU) *B {
 		}
 		for k, v := range g.Extra {
 			d.Attributes[resourceapi.QualifiedName(k)] = resourceapi.DeviceAttribute{StringValue: ptr.To(v)}
+		}
+		for k, v := range g.Lists {
+			d.Attributes[resourceapi.QualifiedName(k)] = resourceapi.DeviceAttribute{StringValues: v}
 		}
 		sl.Spec.Devices = append(sl.Spec.Devices, d)
 	}

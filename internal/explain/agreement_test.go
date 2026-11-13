@@ -7,6 +7,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	resourceapi "k8s.io/api/resource/v1"
@@ -15,6 +16,15 @@ import (
 	"github.com/asaleem9/claimcheck/internal/features"
 	tu "github.com/asaleem9/claimcheck/internal/testutil"
 )
+
+// derivedExprs define example.com/fabric per request; the last one fails on
+// devices without an nvlink attribute, which makes the allocator error.
+var derivedExprs = []string{
+	`device.attributes["gpu.example.com"].?nvlink.orValue("none")`,
+	`device.attributes["gpu.example.com"].numa`,
+	`"x-" + device.attributes["gpu.example.com"].?numa.orValue("")`,
+	`device.attributes["gpu.example.com"].nvlink`,
+}
 
 var agreementN = flag.Int("agreement.n", 3000, "number of random clusters for TestAgreement")
 
@@ -33,11 +43,11 @@ func TestAgreement(t *testing.T) {
 	selectors := []string{
 		`device.attributes["gpu.example.com"].model == "H100"`,
 		`device.attributes["gpu.example.com"].model != "A10"`,
-		`device.capacity["gpu.example.com"].memory.compareTo(quantity("40Gi")) >= 0`,
-		`device.capacity["gpu.example.com"].memory.compareTo(quantity("80Gi")) < 0`,
+		`device.capacity["gpu.example.com"].?memory.orValue(quantity("0")).compareTo(quantity("40Gi")) >= 0`,
+		`device.capacity["gpu.example.com"].?memory.orValue(quantity("0")).compareTo(quantity("80Gi")) < 0`,
 		`true`,
 		`device.attributes["gpu.example.com"].?profile.orValue("") != "full"`,
-		`device.capacity["gpu.example.com"].memory.compareTo(quantity("40Gi")) <= 0`,
+		`device.capacity["gpu.example.com"].?memory.orValue(quantity("0")).compareTo(quantity("40Gi")) <= 0`,
 		`device.attributes["gpu.example.com"].model == "NIC"`,
 		`device.attributes["gpu.example.com"].model != "NIC"`,
 	}
@@ -45,14 +55,18 @@ func TestAgreement(t *testing.T) {
 	toleration := resourceapi.DeviceToleration{Key: "example.com/unhealthy", Operator: resourceapi.DeviceTolerationOpExists}
 
 	skipped, checked := 0, 0
+	outcomes := map[string]int{}
 	defer func() {
-		t.Logf("%d node checks, %d left unexplained by design", checked, skipped)
+		t.Logf("%d node checks, %d left unexplained by design; outcomes: %v", checked, skipped, outcomes)
 		if skipped*100 > checked {
 			t.Errorf("more than 1%% of nodes unexplained (%d of %d)", skipped, checked)
 		}
 	}()
 	for seed := range uint64(iterations) {
 		r := rand.New(rand.NewPCG(seed, 42))
+		// Every other cluster enables the alpha features claimcheck models:
+		// CEL-derived and list-typed attributes.
+		alpha := seed%2 == 1
 		b := tu.New().GPUClass()
 		nodes := 1 + r.IntN(3)
 		devCount := 0
@@ -111,6 +125,14 @@ func TestAgreement(t *testing.T) {
 					g.Extra["nvlink"] = []string{"a", "b", "c"}[r.IntN(3)]
 				}
 				g.Extra["numa"] = []string{"0", "1"}[r.IntN(2)]
+				if alpha && r.IntN(2) == 0 {
+					// List-typed attribute: the NVLink domains a GPU bridges.
+					all := []string{"a", "b", "c"}
+					g.Lists = map[string][]string{"links": {all[r.IntN(3)]}}
+					if r.IntN(2) == 0 {
+						g.Lists["links"] = append(g.Lists["links"], all[r.IntN(3)])
+					}
+				}
 				gpus = append(gpus, g)
 			}
 			if len(gpus) > 0 {
@@ -138,6 +160,9 @@ func TestAgreement(t *testing.T) {
 			}
 			if r.IntN(4) == 0 {
 				q.Bandwidth = []string{"500M", "2G", "3G", "4G", "9G"}[r.IntN(5)]
+			}
+			if alpha && r.IntN(3) == 0 {
+				q.Derived = map[string]string{"example.com/fabric": derivedExprs[r.IntN(len(derivedExprs))]}
 			}
 			return q
 		}
@@ -168,7 +193,11 @@ func TestAgreement(t *testing.T) {
 						names = append(names, q.Name)
 					}
 				}
-				attr := []string{"gpu.example.com/nvlink", "gpu.example.com/numa"}[r.IntN(2)]
+				attrs := []string{"gpu.example.com/nvlink", "gpu.example.com/numa"}
+				if alpha {
+					attrs = append(attrs, "gpu.example.com/links", "example.com/fabric")
+				}
+				attr := attrs[r.IntN(len(attrs))]
 				if r.IntN(3) == 0 {
 					b.DistinctAttribute(attr, names...)
 				} else {
@@ -178,12 +207,44 @@ func TestAgreement(t *testing.T) {
 		}
 		b.Pod("ns", "pod", nil, claimNames...)
 
-		rep, err := explain.Pod(context.Background(), b.S, "ns", "pod", explain.Options{Features: features.Default()})
+		f := features.Default()
+		if alpha {
+			f.DerivedAttributes, f.ListTypeAttributes = true, true
+		}
+		rep, err := explain.Pod(context.Background(), b.S, "ns", "pod", explain.Options{Features: f})
 		if err != nil {
 			t.Fatalf("seed %d: %v", seed, err)
 		}
 		for _, n := range rep.Nodes {
 			checked++
+			switch {
+			case n.Verdict.Fits:
+				outcomes["fits"]++
+			case explain.IsDerivedError(n.Verdict.Err):
+				outcomes["derived-error"]++
+			case explain.IsConstraintError(n.Verdict.Err):
+				outcomes["all-mode-constraint-error"]++
+			case n.Verdict.Err != "":
+				msg := n.Verdict.Err
+				if i := strings.Index(msg, ": "); i >= 0 {
+					msg = msg[i+2:]
+				}
+				if i := strings.Index(msg, ": "); i >= 0 {
+					msg = msg[i+2:]
+				}
+				if len(msg) > 40 {
+					msg = msg[:40]
+				}
+				outcomes["error: "+msg]++
+			case n.Diagnosis.ConstraintFailure != "":
+				outcomes["constraint"]++
+			case n.Diagnosis.CounterConflict != "":
+				outcomes["counters-together"]++
+			case n.Diagnosis.Contention != "":
+				outcomes["contention"]++
+			default:
+				outcomes["request-unsatisfied"]++
+			}
 			if !n.Agree && len(n.Diagnosis.Unanalyzed) > 0 {
 				skipped++ // the solver gave up honestly; counted below
 				continue

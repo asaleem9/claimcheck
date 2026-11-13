@@ -11,7 +11,7 @@ Nodes (allocator verdict · why)
 
 Why
   On worker the requests can get enough devices, but not ones that satisfy the claim's constraints:
-      matchAttribute gpu.example.com/nvlink on "a" and "b" needs 2 devices with the same value; the most any value has is 1
+      matchAttribute gpu.example.com/nvlink on "a" and "b" needs 2 devices that share a value; the most any value has is 1
       usable: nvlink=domain-a: gpu-0 · nvlink=domain-b: gpu-2 · not set: gpu-3
 
 Devices on worker

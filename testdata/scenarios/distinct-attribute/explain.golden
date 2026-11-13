@@ -11,7 +11,7 @@ Nodes (allocator verdict · why)
 
 Why
   On worker the requests can get enough devices, but not ones that satisfy the claim's constraints:
-      distinctAttribute gpu.example.com/nvlink on "gpus" needs 3 devices with different values; usable devices have only 2 distinct values
+      distinctAttribute gpu.example.com/nvlink on "gpus" needs 3 devices with no value in common; usable devices have only 2 distinct values
       usable: nvlink=domain-b: gpu-1, gpu-2 · nvlink=domain-a: gpu-0 · not set: gpu-3
 
 Devices on worker

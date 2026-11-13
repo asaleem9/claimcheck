@@ -1,0 +1,14 @@
+
+DRA capacity  1 node · 1 pool
+
+  DEVICECLASS       TOTAL   IN USE   SHARED   TAINTED   BLOCKED   UNAVAILABLE   FREE
+  gpu.example.com   3       0        0        0         0         0             3
+
+worker · pool worker  gpu.example.com
+  ░░░  3 free
+    gpu-0   ░ free   
+    gpu-1   ░ free   
+    gpu-2   ░ free   
+
+legend  █ in use ▓ shared ▚ tainted ▒ blocked × unavailable ░ free
+
