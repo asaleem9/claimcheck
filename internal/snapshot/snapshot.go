@@ -10,6 +10,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	resourceapi "k8s.io/api/resource/v1"
+	schedulingapi "k8s.io/api/scheduling/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
@@ -32,6 +33,7 @@ type Snapshot struct {
 	ResourceSlices   []resourceapi.ResourceSlice   `json:"resourceSlices,omitempty"`
 	ResourceClaims   []resourceapi.ResourceClaim   `json:"resourceClaims,omitempty"`
 	DeviceTaintRules []resourceapi.DeviceTaintRule `json:"deviceTaintRules,omitempty"`
+	PodGroups        []schedulingapi.PodGroup      `json:"podGroups,omitempty"`
 }
 
 type Metadata struct {
@@ -72,6 +74,7 @@ func (s *Snapshot) sort() {
 		return key(&s.ResourceClaims[i].ObjectMeta) < key(&s.ResourceClaims[j].ObjectMeta)
 	})
 	sort.Slice(s.DeviceTaintRules, func(i, j int) bool { return s.DeviceTaintRules[i].Name < s.DeviceTaintRules[j].Name })
+	sort.Slice(s.PodGroups, func(i, j int) bool { return key(&s.PodGroups[i].ObjectMeta) < key(&s.PodGroups[j].ObjectMeta) })
 }
 
 func key(m *metav1.ObjectMeta) string { return m.Namespace + "/" + m.Name }
@@ -94,6 +97,16 @@ func (s *Snapshot) Claim(namespace, name string) (*resourceapi.ResourceClaim, er
 		}
 	}
 	return nil, apierrors.NewNotFound(resourceapi.Resource("resourceclaims"), name)
+}
+
+// PodGroup returns the named PodGroup or a NotFound error.
+func (s *Snapshot) PodGroup(namespace, name string) (*schedulingapi.PodGroup, error) {
+	for i := range s.PodGroups {
+		if s.PodGroups[i].Namespace == namespace && s.PodGroups[i].Name == name {
+			return &s.PodGroups[i], nil
+		}
+	}
+	return nil, apierrors.NewNotFound(schedulingapi.Resource("podgroups"), name)
 }
 
 // Node returns the named node, or nil.
@@ -156,6 +169,9 @@ func (s *Snapshot) DeepCopy() *Snapshot {
 	}
 	for i := range s.DeviceTaintRules {
 		out.DeviceTaintRules = append(out.DeviceTaintRules, *s.DeviceTaintRules[i].DeepCopy())
+	}
+	for i := range s.PodGroups {
+		out.PodGroups = append(out.PodGroups, *s.PodGroups[i].DeepCopy())
 	}
 	return out
 }

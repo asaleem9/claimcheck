@@ -1,0 +1,22 @@
+
+podgroup ml/train-gang  (gang, minCount 2, 2 members)
+
+ BLOCKED   Only 1 of 2 members can get their devices at the same time; the gang needs 2.
+
+Members (placed in name order; each sees the devices taken before it)
+  train-0   ✓ worker-b   gpu-2, gpu-3, gpu-0
+  train-1   ✗            no eligible node can allocate the claims (1 node checked).
+
+Why train-1 can't be placed
+  control-plane   –   excluded: already-allocated claim shared-h100 is pinned to other nodes
+  worker-a        –   excluded: already-allocated claim shared-h100 is pinned to other nodes
+  worker-b        ✗   gpus 0/2 usable · 2 fail selector #0, 2 in use
+  request "gpus" in ml/train-1-gpus: needs 2, 0 usable (4 devices considered).
+    selector #0 rejects 2 of 4 devices: device.attributes["gpu.example.com"].model == "L40S"
+        values seen: model=H100 ×2
+    2 of 4 devices match but are already allocated: ml/train-0-gpus ×2
+    it would fit on worker-a (already-allocated claim shared-h100 is pinned to other nodes), but the pod can't run there.
+
+Notes
+  • members are placed in name order on the first node that fits; the scheduler scores nodes, so a different placement might fit more members
+

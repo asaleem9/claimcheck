@@ -106,6 +106,51 @@ kubectl claimcheck explain pod/llm-train -n ml -o json
 # A standalone claim: where would it fit right now?
 kubectl claimcheck explain resourceclaim/shared-gpu -n ml
 
+# Can every member of a gang-scheduled PodGroup get its devices at once?
+kubectl claimcheck explain podgroup/train-gang -n ml
+```
+
+### What would change it
+
+```sh
+# Which single change (freeing one claim, removing one taint rule) would let it fit?
+kubectl claimcheck whatif pod/llm-train -n ml --suggest
+
+# Before and after, without touching the cluster
+kubectl claimcheck whatif pod/llm-train -n ml --free pod/finetune
+kubectl claimcheck whatif pod/llm-train -n ml --remove-taint-rule driver-upgrade-worker2
+
+# Would this claim fit right now, and where?
+kubectl claimcheck whatif -f claim.yaml -n ml
+```
+
+```
+pod ml/llm-train  BLOCKED   tried 2 single changes
+
+  Any one of these would let it fit:
+    free ResourceClaim ml/finetune-gpus-vz6tj       holds 6 devices in claimcheck-worker   → fits on claimcheck-worker
+    remove DeviceTaintRule driver-upgrade-worker2                                          → fits on claimcheck-worker2
+```
+
+### Capacity and fragmentation
+
+```sh
+kubectl claimcheck pools            # every pool: in use, shared, tainted, blocked, free
+kubectl claimcheck pools --devices  # plus each device's holder or reason
+```
+
+```
+worker · pool worker  gpu.example.com
+  ██▒▒▒▒▒▒▒░░░░░  2 in use · 7 blocked · 5 free
+  gpu-0 memory   █████░░░░░░░░░░░░░░░   20Gi of 80Gi used · largest free partition 40Gi
+  gpu-1 memory   ████████████████████   80Gi of 80Gi used
+```
+
+"Blocked" partitions are free but can't be allocated, because sibling partitions of the same GPU use up the shared counters. That's GPU fragmentation, and no `kubectl get` output shows it.
+
+### Offline and in bug reports
+
+```sh
 # Capture the cluster's DRA state once, explain anywhere (bug reports, CI, demos)
 kubectl claimcheck snapshot -f cluster.yaml
 kubectl claimcheck explain pod/llm-train -n ml --from cluster.yaml
@@ -148,9 +193,11 @@ Each scenario in `testdata/scenarios/` has a `snapshot.yaml` and its expected `e
 
 - [x] `explain` for pods and claims, `snapshot`, offline `--from`
 - [x] `matchAttribute` / `distinctAttribute`, partitionable devices and shared counters, consumable capacity
-- [ ] `whatif`: would it fit if claim X were released, or with this claim instead?
-- [ ] `pools`: free, allocated and tainted devices and fragmentation per pool
-- [ ] `explain podgroup/…` for gang-scheduled workloads (Workload / PodGroup API, beta in v1.37)
+- [x] `whatif`, including `--suggest` for the single change that would make it fit
+- [x] `pools`: free, used, tainted and fragmented devices per pool
+- [x] `explain podgroup/…` for gang-scheduled workloads (Workload / PodGroup API, beta in v1.37)
+- [ ] CEL-derived attributes, list-typed attributes and device compatibility groups (alpha in v1.37)
+- [ ] Partitionable-device and gang scenarios in the end-to-end suite
 
 ## License
 

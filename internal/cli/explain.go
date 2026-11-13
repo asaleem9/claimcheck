@@ -15,13 +15,16 @@ func newExplain(g *globals) *cobra.Command {
 	var output, color string
 	var devices bool
 	cmd := &cobra.Command{
-		Use:   "explain (pod/NAME | resourceclaim/NAME | NAME)",
+		Use:   "explain (pod/NAME | resourceclaim/NAME | podgroup/NAME | NAME)",
 		Short: "Explain why a pod's ResourceClaims can or can't be allocated",
 		Example: `  # Why is this pod Pending?
   kubectl claimcheck explain pod/llm-train -n ml
 
   # Explain a standalone ResourceClaim, with the per-device table
   kubectl claimcheck explain resourceclaim/shared-gpu --devices
+
+  # Can every member of a gang-scheduled PodGroup get its devices at once?
+  kubectl claimcheck explain podgroup/train-gang -n ml
 
   # Explain offline from a snapshot someone attached to a bug report
   kubectl claimcheck explain pod/llm-train -n ml --from snapshot.yaml`,
@@ -48,6 +51,16 @@ func newExplain(g *globals) *cobra.Command {
 			}
 			opts := explain.Options{Features: f}
 			ns := g.namespace()
+			if kind == "podgroup" {
+				gang, err := explain.PodGroup(cmd.Context(), snap, ns, name, opts)
+				if err != nil {
+					return err
+				}
+				if output == "json" {
+					return render.JSONAny(g.out, gang)
+				}
+				return render.Gang(g.out, gang, render.TextOptions{Style: style, Devices: devices})
+			}
 			var rep *explain.Report
 			if kind == "pod" {
 				rep, err = explain.Pod(cmd.Context(), snap, ns, name, opts)
@@ -79,8 +92,10 @@ func parseTarget(arg string) (kind, name string, err error) {
 		return "pod", n, nil
 	case "resourceclaim", "resourceclaims":
 		return "resourceclaim", n, nil
+	case "podgroup", "podgroups", "pg":
+		return "podgroup", n, nil
 	}
-	return "", "", fmt.Errorf("unsupported target %q: use pod/NAME or resourceclaim/NAME", arg)
+	return "", "", fmt.Errorf("unsupported target %q: use pod/NAME, resourceclaim/NAME or podgroup/NAME", arg)
 }
 
 func styleFor(mode string) (render.Style, error) {

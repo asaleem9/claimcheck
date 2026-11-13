@@ -87,10 +87,24 @@ func FromCluster(ctx context.Context, cs kubernetes.Interface, contextName strin
 		return nil, fmt.Errorf("list devicetaintrules: %w", err)
 	}
 
+	groups, err := cs.SchedulingV1beta1().PodGroups(metav1.NamespaceAll).List(ctx, all)
+	switch {
+	case err == nil:
+		for _, pg := range groups.Items {
+			strip(&pg.ObjectMeta)
+			s.PodGroups = append(s.PodGroups, pg)
+		}
+	case apierrors.IsNotFound(err), apierrors.IsForbidden(err):
+		// The Workload/PodGroup API is beta in v1.37 and not served by
+		// default; without it there are no gangs to explain.
+	default:
+		return nil, fmt.Errorf("list podgroups: %w", err)
+	}
+
 	s.sort()
 	return s, nil
 }
 
 func usesDRA(p *corev1.Pod) bool {
-	return len(p.Spec.ResourceClaims) > 0 || p.Status.ExtendedResourceClaimStatus != nil
+	return len(p.Spec.ResourceClaims) > 0 || p.Status.ExtendedResourceClaimStatus != nil || p.Spec.SchedulingGroup != nil
 }

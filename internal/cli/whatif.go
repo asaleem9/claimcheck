@@ -61,8 +61,11 @@ let it fit.`,
 					return fmt.Errorf("--free: %w", err)
 				}
 				k := whatif.FreePod
-				if kind == "resourceclaim" {
+				switch kind {
+				case "resourceclaim":
 					k = whatif.FreeClaim
+				case "podgroup":
+					return fmt.Errorf("--free takes pod/NAME or resourceclaim/NAME")
 				}
 				changes = append(changes, whatif.Change{Kind: k, Namespace: ns, Name: name})
 			}
@@ -76,6 +79,9 @@ let it fit.`,
 				kind, name, err := parseTarget(args[0])
 				if err != nil {
 					return err
+				}
+				if kind == "podgroup" {
+					return fmt.Errorf("whatif works on pods and claims; use explain podgroup/%s", name)
 				}
 				t = whatif.Target{Kind: kind, Namespace: ns, Name: name}
 			case file != "" && len(changes) > 0 && changes[0].Kind == whatif.AddClaim:

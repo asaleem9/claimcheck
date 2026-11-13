@@ -73,6 +73,9 @@ type Report struct {
 	Hints    []string     `json:"hints,omitempty"`
 	Notes    []string     `json:"notes,omitempty"`
 	FitNodes []string     `json:"fitNodes,omitempty"`
+	// PendingClaims lists the unallocated claims in the order the allocator
+	// received them; each node's verdict allocation follows this order.
+	PendingClaims []string `json:"pendingClaims,omitempty"`
 }
 
 type Options struct {
@@ -80,6 +83,9 @@ type Options struct {
 	// Hypothetical marks a what-if run, where the pod's real status says
 	// nothing about the changed cluster.
 	Hypothetical bool
+	// ExtraClaims names claims (in the pod's namespace) to consider with
+	// the pod's own, such as claims shared by its PodGroup.
+	ExtraClaims []string
 }
 
 // Pod explains why a pod's ResourceClaims can or can't be allocated.
@@ -120,10 +126,38 @@ func Pod(ctx context.Context, snap *snapshot.Snapshot, namespace, name string, o
 			pending = append(pending, claim)
 		}
 	}
+	// Claims shared by the pod's group are allocated with the first member
+	// and pin the others to the nodes they were allocated for.
+	for _, name := range opts.ExtraClaims {
+		claim, err := snap.Claim(namespace, name)
+		if err != nil {
+			rep.Notes = append(rep.Notes, fmt.Sprintf("group claim %s not found", name))
+			continue
+		}
+		if hasClaim(rep.Claims, claim.Name) {
+			continue
+		}
+		c := Claim{Name: claim.Name, PodClaim: "(pod group)", Allocated: claim.Status.Allocation != nil}
+		rep.Claims = append(rep.Claims, c)
+		if c.Allocated {
+			allocated = append(allocated, claim)
+		} else {
+			pending = append(pending, claim)
+		}
+	}
 	if pod.Status.ExtendedResourceClaimStatus != nil {
 		rep.Notes = append(rep.Notes, "pod uses extended resources backed by DRA; those requests are not analyzed yet")
 	}
 	return run(ctx, snap, rep, pod, pending, allocated, opts)
+}
+
+func hasClaim(cs []Claim, name string) bool {
+	for _, c := range cs {
+		if c.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // ResourceClaim explains a single ResourceClaim as if a pod with only that claim
@@ -162,6 +196,7 @@ func run(ctx context.Context, snap *snapshot.Snapshot, rep *Report, pod *corev1.
 	skip := sets.New[types.UID]()
 	for _, c := range pending {
 		skip.Insert(c.UID)
+		rep.PendingClaims = append(rep.PendingClaims, c.Name)
 	}
 	dg := NewDiagnoser(snap, opts.Features, skip)
 	ev, err := verdict.New(ctx, verdict.Input{

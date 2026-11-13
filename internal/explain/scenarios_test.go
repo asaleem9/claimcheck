@@ -361,3 +361,78 @@ func must(t *testing.T, err error) {
 		t.Fatal(err)
 	}
 }
+
+var l40s = `device.attributes["gpu.example.com"].model == "L40S"`
+
+// gang returns a PodGroup of n members that each need two L40S GPUs. The
+// standard cluster has six L40S (four on worker-a, two on worker-b).
+func gang(n int, minCount int32, groupClaims ...string) func(b *tu.B) *tu.B {
+	return func(b *tu.B) *tu.B {
+		b.PodGroup("ml", "train-gang", minCount, groupClaims...)
+		for i := range n {
+			claim := fmt.Sprintf("train-%d-gpus", i)
+			b.Claim("ml", claim, tu.Req{Name: "gpus", Count: 2, Selectors: []string{l40s}})
+			b.Member("ml", "train-gang", fmt.Sprintf("train-%d", i), claim)
+		}
+		return b
+	}
+}
+
+var gangScenarios = []struct {
+	name   string
+	build  func() *tu.B
+	status explain.Status
+}{
+	{"gang-blocked", func() *tu.B { return gang(4, 4)(tu.Standard()) }, explain.Blocked},
+	{"gang-fits", func() *tu.B { return gang(4, 3)(tu.Standard()) }, explain.Fits},
+	{"gang-group-claim", func() *tu.B {
+		b := tu.Standard().Claim("ml", "shared-h100", tu.Req{Name: "gpu", Selectors: []string{h100}})
+		return gang(2, 2, "shared-h100")(b)
+	}, explain.Blocked},
+}
+
+func TestGangScenarios(t *testing.T) {
+	for _, sc := range gangScenarios {
+		t.Run(sc.name, func(t *testing.T) {
+			snap := sc.build().S
+			rep, err := explain.PodGroup(context.Background(), snap, "ml", "train-gang", explain.Options{Features: features.Default()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rep.Status != sc.status {
+				t.Errorf("status = %s, want %s: %s", rep.Status, sc.status, rep.Summary)
+			}
+			for _, m := range rep.Members {
+				if m.Report == nil {
+					continue
+				}
+				for _, n := range m.Report.Nodes {
+					if !n.Agree && n.Excluded == "" {
+						t.Errorf("member %s node %s: explanation disagrees with allocator", m.Pod, n.Node)
+					}
+				}
+			}
+			var buf bytes.Buffer
+			if err := render.Gang(&buf, rep, render.TextOptions{Style: render.Plain()}); err != nil {
+				t.Fatal(err)
+			}
+			dir := filepath.Join("..", "..", "testdata", "scenarios", sc.name)
+			golden := filepath.Join(dir, "explain.golden")
+			if *update {
+				data, err := snap.Marshal()
+				must(t, err)
+				must(t, os.MkdirAll(dir, 0o755))
+				must(t, os.WriteFile(filepath.Join(dir, "snapshot.yaml"), data, 0o644))
+				must(t, os.WriteFile(golden, buf.Bytes(), 0o644))
+				return
+			}
+			want, err := os.ReadFile(golden)
+			if err != nil {
+				t.Fatalf("%v (run go test ./internal/explain -update)", err)
+			}
+			if !bytes.Equal(want, buf.Bytes()) {
+				t.Errorf("output differs from %s (run with -update to accept):\n%s", golden, buf.String())
+			}
+		})
+	}
+}

@@ -7,6 +7,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	resourceapi "k8s.io/api/resource/v1"
+	schedulingapi "k8s.io/api/scheduling/v1beta1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -366,5 +367,29 @@ func (b *B) AllocatedShare(ns, name, node, device, bandwidth string) *B {
 		}}},
 	}
 	b.S.ResourceClaims = append(b.S.ResourceClaims, c)
+	return b
+}
+
+// PodGroup adds a gang-scheduled PodGroup with minCount and optional
+// group-level claims (by existing claim name).
+func (b *B) PodGroup(ns, name string, minCount int32, groupClaims ...string) *B {
+	pg := schedulingapi.PodGroup{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name, UID: types.UID("uid-pg-" + name)},
+		Spec: schedulingapi.PodGroupSpec{
+			SchedulingPolicy: schedulingapi.PodGroupSchedulingPolicy{Gang: &schedulingapi.GangSchedulingPolicy{MinCount: minCount}},
+		},
+	}
+	for _, c := range groupClaims {
+		pg.Spec.ResourceClaims = append(pg.Spec.ResourceClaims, schedulingapi.PodGroupResourceClaim{Name: c, ResourceClaimName: ptr.To(c)})
+	}
+	b.S.PodGroups = append(b.S.PodGroups, pg)
+	return b
+}
+
+// Member adds a pending pod of a PodGroup with its own claims.
+func (b *B) Member(ns, group, name string, claims ...string) *B {
+	b.Pod(ns, name, nil, claims...)
+	p := &b.S.Pods[len(b.S.Pods)-1]
+	p.Spec.SchedulingGroup = &corev1.PodSchedulingGroup{PodGroupName: ptr.To(group)}
 	return b
 }
