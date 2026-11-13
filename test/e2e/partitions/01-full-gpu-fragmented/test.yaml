@@ -1,0 +1,35 @@
+# target: pod/llm-train
+# namespace: cc-frag
+# expect-status: Blocked
+# expect-reason: CountersExhausted
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  namespace: cc-frag
+  name: whole-gpu
+spec:
+  spec:
+    devices:
+      requests:
+      - name: gpu
+        exactly:
+          deviceClassName: gpu.example.com
+          selectors:
+          - cel:
+              expression: "device.attributes['gpu.example.com'].?full.orValue(false)"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: cc-frag
+  name: llm-train
+spec:
+  containers:
+  - name: train
+    image: registry.k8s.io/pause:3.10
+    resources:
+      claims:
+      - name: gpu
+  resourceClaims:
+  - name: gpu
+    resourceClaimTemplateName: whole-gpu

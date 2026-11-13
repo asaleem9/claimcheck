@@ -85,6 +85,16 @@ func Pools(w io.Writer, r PoolsReport, o TextOptions) error {
 			fmt.Fprintf(&b, "  %s  %s\n", strip(s, p.Devices), stateSummary(s, p.Count()))
 		}
 		var rows [][]cell
+		// Counter sets with identical usage (common when every GPU is
+		// partitioned the same way) collapse into one row.
+		type counterRow struct {
+			sets      []string
+			name      string
+			used, all resource.Quantity
+			info      string
+		}
+		var crows []*counterRow
+		byKey := map[string]*counterRow{}
 		for _, ctr := range p.Counters {
 			used := ctr.Total.DeepCopy()
 			used.Sub(ctr.Left)
@@ -95,7 +105,21 @@ func Pools(w io.Writer, r PoolsReport, o TextOptions) error {
 			case ctr.Left.Sign() > 0:
 				info += " · no free partition fits"
 			}
-			rows = append(rows, []cell{c(ctr.Set+" "+ctr.Name, nil), c(bar(s, used, ctr.Total), nil), c(info, s.Dim)})
+			k := ctr.Name + "|" + info
+			if r := byKey[k]; r != nil {
+				r.sets = append(r.sets, ctr.Set)
+				continue
+			}
+			r := &counterRow{sets: []string{ctr.Set}, name: ctr.Name, used: used, all: ctr.Total, info: info}
+			byKey[k] = r
+			crows = append(crows, r)
+		}
+		for _, r := range crows {
+			label := r.sets[0]
+			if n := len(r.sets); n > 1 {
+				label = fmt.Sprintf("%s … %s (%d)", r.sets[0], r.sets[n-1], n)
+			}
+			rows = append(rows, []cell{c(label+" "+r.name, nil), c(bar(s, r.used, r.all), nil), c(r.info, s.Dim)})
 		}
 		for _, cp := range p.Capacities {
 			info := fmt.Sprintf("%s of %s used", cp.Used.String(), cp.Total.String())

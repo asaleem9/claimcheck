@@ -35,14 +35,52 @@ type header struct {
 	reason                string
 }
 
+// TestScenarios runs against whole GPUs (hack/kind/up.sh).
 func TestScenarios(t *testing.T) {
+	cs := client(t)
+	if partitioned(t, cs) {
+		t.Skip("cluster publishes partitioned GPUs; these scenarios need whole GPUs")
+	}
+	run(t, cs, "scenarios")
+}
+
+// TestPartitionScenarios runs against partitioned GPUs
+// (GPU_PARTITIONS=4 hack/kind/up.sh).
+func TestPartitionScenarios(t *testing.T) {
+	cs := client(t)
+	if !partitioned(t, cs) {
+		t.Skip("cluster publishes whole GPUs; rerun hack/kind/up.sh with GPU_PARTITIONS=4")
+	}
+	run(t, cs, "partitions")
+}
+
+func client(t *testing.T) kubernetes.Interface {
+	t.Helper()
 	cfg, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
 		clientcmd.NewDefaultClientConfigLoadingRules(), &clientcmd.ConfigOverrides{}).ClientConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
-	cs := kubernetes.NewForConfigOrDie(cfg)
-	dirs, err := filepath.Glob("scenarios/*")
+	return kubernetes.NewForConfigOrDie(cfg)
+}
+
+// partitioned reports whether the driver publishes shared counters.
+func partitioned(t *testing.T, cs kubernetes.Interface) bool {
+	t.Helper()
+	slices, err := cs.ResourceV1().ResourceSlices().List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range slices.Items {
+		if len(s.Spec.SharedCounters) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func run(t *testing.T, cs kubernetes.Interface, set string) {
+	dirs, err := filepath.Glob(set + "/*")
 	if err != nil {
 		t.Fatal(err)
 	}

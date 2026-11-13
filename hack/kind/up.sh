@@ -6,6 +6,9 @@ set -euo pipefail
 CLUSTER="${CLUSTER:-claimcheck}"
 K8S_VERSION="${K8S_VERSION:-v1.37.0}"
 DRIVER_VERSION="${DRIVER_VERSION:-v0.5.0}"
+# GPU_PARTITIONS > 0 publishes each mock GPU as that many partitions plus a
+# full device, sharing memory and compute counters.
+GPU_PARTITIONS="${GPU_PARTITIONS:-0}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CACHE="${HERE}/.cache"
 
@@ -34,12 +37,15 @@ fi
 
 helm upgrade --install --create-namespace --namespace dra-example-driver dra-example-driver \
   "${CACHE}/dra-example-driver/deployments/helm/dra-example-driver" \
-  --set image.tag="${DRIVER_VERSION}" --wait --timeout 5m
+  --set image.tag="${DRIVER_VERSION}" --set kubeletPlugin.gpuPartitions="${GPU_PARTITIONS}" --wait --timeout 5m
 
 echo "waiting for ResourceSlices from both workers..."
 for _ in $(seq 60); do
   n=$(kubectl get resourceslices -o name 2>/dev/null | wc -l | tr -d ' ')
-  [[ "${n}" -ge 2 ]] && break
+  counters=$(kubectl get resourceslices -o jsonpath='{range .items[*]}{.spec.sharedCounters[0].name}{"\n"}{end}' 2>/dev/null | grep -c . || true)
+  if [[ "${n}" -ge 2 && ( "${GPU_PARTITIONS}" == 0 && "${counters}" == 0 || "${GPU_PARTITIONS}" != 0 && "${counters}" -ge 2 ) ]]; then
+    break
+  fi
   sleep 2
 done
 kubectl get resourceslices

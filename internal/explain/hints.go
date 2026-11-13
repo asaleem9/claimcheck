@@ -201,7 +201,7 @@ func requestHints(v *requestView) []string {
 		case diagnose.CapacityError:
 			out = append(out, fmt.Sprintf("  computing capacity fails on %s: %s\n      the scheduler treats this as an error for the whole pod", of, firstKey(b.details)))
 		case diagnose.CountersExhausted:
-			out = append(out, fmt.Sprintf("  %s %s, but %s physical device has no counters left: %s", of, vb("matches", "match"), vb("its", "their"), histogram(b.details)))
+			out = append(out, fmt.Sprintf("  %s %s, but %s physical device has no counters left: %s", of, vb("matches", "match"), vb("its", "their"), histogramN(b.details, 2)))
 		case diagnose.PoolIncomplete:
 			out = append(out, fmt.Sprintf("  %s %s skipped because %s pool is incomplete: %s", of, vb("is", "are"), vb("its", "their"), firstKey(b.details)))
 		case diagnose.DeviceNode:
@@ -219,7 +219,9 @@ func requestHints(v *requestView) []string {
 	return out
 }
 
-func histogram(m map[string]int) string {
+func histogram(m map[string]int) string { return histogramN(m, 4) }
+
+func histogramN(m map[string]int, limit int) string {
 	type kv struct {
 		k string
 		n int
@@ -239,8 +241,8 @@ func histogram(m map[string]int) string {
 	})
 	var parts []string
 	for i, e := range kvs {
-		if i == 4 {
-			parts = append(parts, fmt.Sprintf("… %d more", len(kvs)-4))
+		if i == limit {
+			parts = append(parts, fmt.Sprintf("… %d more", len(kvs)-limit))
 			break
 		}
 		parts = append(parts, fmt.Sprintf("%s ×%d", e.k, e.n))

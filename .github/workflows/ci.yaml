@@ -41,5 +41,9 @@ jobs:
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - name: Create cluster with mock GPUs
         run: hack/kind/up.sh
-      - name: End-to-end tests against kube-scheduler
+      - name: End-to-end tests against kube-scheduler (whole GPUs)
         run: go test -tags e2e ./test/e2e -v -count=1
+      - name: Switch the driver to partitioned GPUs
+        run: GPU_PARTITIONS=4 hack/kind/up.sh
+      - name: End-to-end tests against kube-scheduler (partitioned GPUs)
+        run: go test -tags e2e ./test/e2e -v -count=1 -run TestPartitionScenarios

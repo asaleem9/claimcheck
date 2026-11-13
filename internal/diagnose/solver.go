@@ -498,22 +498,47 @@ func (s *solver) describe(c constraintSpec) string {
 		}
 		groups[display] = append(groups[display], id.Device.String())
 	}
-	var parts []string
+	type group struct {
+		value string
+		devs  []string
+	}
+	var gs []group
 	for v, ds := range groups {
 		sort.Slice(ds, func(i, j int) bool { return naturalLess(ds[i], ds[j]) })
-		parts = append(parts, fmt.Sprintf("%s=%s: %s", attrName(c.attr), v, strings.Join(ds, ", ")))
+		gs = append(gs, group{v, ds})
 	}
-	sort.Strings(parts)
+	// Largest groups first: for matchAttribute the biggest group is how
+	// close the claim gets.
+	sort.Slice(gs, func(i, j int) bool {
+		if len(gs[i].devs) != len(gs[j].devs) {
+			return len(gs[i].devs) > len(gs[j].devs)
+		}
+		return naturalLess(gs[i].value, gs[j].value)
+	})
+	const shown = 3
+	var parts []string
+	for i, g := range gs {
+		if i == shown {
+			parts = append(parts, fmt.Sprintf("%d more values", len(gs)-shown))
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%s=%s: %s", attrName(c.attr), g.value, strings.Join(g.devs, ", ")))
+	}
 	if len(unset) > 0 {
 		sort.Slice(unset, func(i, j int) bool { return naturalLess(unset[i], unset[j]) })
 		parts = append(parts, "not set: "+strings.Join(unset, ", "))
 	}
-	want := "the same value"
-	if c.distinct {
-		want = "different values"
+	head := fmt.Sprintf("%s %s on %s needs %d devices with the same value", c.kind(), c.attr, strings.Join(reqs, " and "), need)
+	most := 0
+	if len(gs) > 0 {
+		most = len(gs[0].devs)
 	}
-	return fmt.Sprintf("%s %s on %s needs %d devices with %s; usable devices: %s",
-		c.kind(), c.attr, strings.Join(reqs, " and "), need, want, strings.Join(parts, " · "))
+	summary := fmt.Sprintf("the most any value has is %d", most)
+	if c.distinct {
+		head = fmt.Sprintf("%s %s on %s needs %d devices with different values", c.kind(), c.attr, strings.Join(reqs, " and "), need)
+		summary = fmt.Sprintf("usable devices have only %d distinct values", len(gs))
+	}
+	return fmt.Sprintf("%s; %s\n    usable: %s", head, summary, strings.Join(parts, " · "))
 }
 
 // counterMessage explains that the candidate partitions can't all be

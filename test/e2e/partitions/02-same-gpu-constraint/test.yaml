@@ -1,0 +1,39 @@
+# target: pod/tp-train
+# namespace: cc-same-gpu
+# expect-status: Blocked
+# expect-reason: matchAttribute gpu.example.com/index
+# Three partitions on the same GPU, but each GPU has only two left.
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  namespace: cc-same-gpu
+  name: three-on-one-gpu
+spec:
+  spec:
+    devices:
+      requests:
+      - name: slices
+        exactly:
+          deviceClassName: gpu.example.com
+          count: 3
+          selectors:
+          - cel:
+              expression: "has(device.attributes['gpu.example.com'].partition)"
+      constraints:
+      - matchAttribute: gpu.example.com/index
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: cc-same-gpu
+  name: tp-train
+spec:
+  containers:
+  - name: train
+    image: registry.k8s.io/pause:3.10
+    resources:
+      claims:
+      - name: slices
+  resourceClaims:
+  - name: slices
+    resourceClaimTemplateName: three-on-one-gpu

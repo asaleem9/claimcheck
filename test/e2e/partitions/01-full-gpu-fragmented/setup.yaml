@@ -1,0 +1,59 @@
+# Small jobs take partition 0 of every GPU on both workers, leaving 60Gi of
+# each 80Gi GPU free but no whole GPU anywhere.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cc-frag
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  namespace: cc-frag
+  name: first-partitions
+spec:
+  spec:
+    devices:
+      requests:
+      - name: slices
+        exactly:
+          deviceClassName: gpu.example.com
+          allocationMode: All
+          selectors:
+          - cel:
+              expression: "device.attributes['gpu.example.com'].?partition.orValue(-1) == 0"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: cc-frag
+  name: small-jobs-general
+spec:
+  nodeSelector:
+    pool: general
+  containers:
+  - name: work
+    image: registry.k8s.io/pause:3.10
+    resources:
+      claims:
+      - name: slices
+  resourceClaims:
+  - name: slices
+    resourceClaimTemplateName: first-partitions
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: cc-frag
+  name: small-jobs-training
+spec:
+  nodeSelector:
+    pool: training
+  containers:
+  - name: work
+    image: registry.k8s.io/pause:3.10
+    resources:
+      claims:
+      - name: slices
+  resourceClaims:
+  - name: slices
+    resourceClaimTemplateName: first-partitions
