@@ -1,0 +1,31 @@
+
+pod ml/legacy-train  (Pending)
+
+ FITS   The claims can be allocated on 1 of 4 eligible nodes.
+
+Claims
+  (extended resources)   pending   example.com/gpu: 6 (DeviceClass gpu.example.com); the scheduler creates this claim when it binds the pod
+
+Nodes (allocator verdict · why)
+  control-plane   ✗        example.com/gpu: no devices
+  legacy-node     ✓ fits   example.com/gpu comes from a device plugin on this node
+  worker-a        ✗        example.com/gpu 4/6 usable
+  worker-b        ✗        example.com/gpu 4/6 usable
+
+Notes
+  • the pod is Pending even though DRA would fit; check other scheduling constraints or whether the scheduler has retried since the cluster changed
+
+Devices on worker-a
+  REQUEST           DEVICE           RESULT     DETAIL
+  example.com/gpu   worker-a/gpu-0   ✓ usable   
+  example.com/gpu   worker-a/gpu-1   ✓ usable   
+  example.com/gpu   worker-a/gpu-2   ✓ usable   
+  example.com/gpu   worker-a/gpu-3   ✓ usable   
+
+Devices on worker-b
+  REQUEST           DEVICE           RESULT     DETAIL
+  example.com/gpu   worker-b/gpu-0   ✓ usable   
+  example.com/gpu   worker-b/gpu-1   ✓ usable   
+  example.com/gpu   worker-b/gpu-2   ✓ usable   
+  example.com/gpu   worker-b/gpu-3   ✓ usable   
+

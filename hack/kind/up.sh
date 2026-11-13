@@ -37,7 +37,8 @@ fi
 
 helm upgrade --install --create-namespace --namespace dra-example-driver dra-example-driver \
   "${CACHE}/dra-example-driver/deployments/helm/dra-example-driver" \
-  --set image.tag="${DRIVER_VERSION}" --set kubeletPlugin.gpuPartitions="${GPU_PARTITIONS}" --wait --timeout 5m
+  --set image.tag="${DRIVER_VERSION}" --set kubeletPlugin.gpuPartitions="${GPU_PARTITIONS}" \
+  --set deviceClass.extendedResourceName=example.com/gpu --wait --timeout 5m
 
 echo "waiting for ResourceSlices from both workers..."
 for _ in $(seq 60); do

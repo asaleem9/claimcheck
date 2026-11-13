@@ -79,6 +79,7 @@ flowchart LR
 | A shared device's capacity is used up | what the request needs, what's left, and which claims share it |
 | A capacity request breaks the device's policy | the rounded value and the policy (`min 1G, max 8G, step 1G`) |
 | An `allocationMode: All` device breaks a constraint | that the allocator stops with an error instead of backtracking |
+| A pod asks for `example.com/gpu: 4` with no ResourceClaim | the claim the scheduler would build from the DeviceClass's `extendedResourceName`, explained like any other, and which nodes serve the resource through a device plugin instead |
 | DeviceClass doesn't exist | the scheduler-level error |
 | It would fit, but on a node the pod can't use | the node and the `nodeSelector` or pinned claim that rules it out |
 | Driver not publishing devices | no devices visible for the class on any node |
@@ -182,7 +183,6 @@ Alpha features need `--features`, since feature gates can't be read from the API
 When the diagnosis can't account for a decision, claimcheck reports `UNEXPLAINED` instead of guessing. The known cases:
 - constraints on `adminAccess` requests
 - a search that exceeds its step budget
-- extended resources backed by DRA: these pod requests aren't analyzed yet, and claimcheck says so in a note
 
 ## Development
 
@@ -207,7 +207,7 @@ Each scenario in `testdata/scenarios/` has a `snapshot.yaml` and its expected `e
 - [x] `pools`: free, used, tainted and fragmented devices per pool
 - [x] `explain podgroup/…` for gang-scheduled workloads (Workload / PodGroup API, beta in v1.37)
 - [x] CEL-derived attributes, list-typed attributes and device compatibility groups (alpha in v1.37)
-- [ ] Extended resources backed by DRA (`example.com/gpu: 1` in a pod's resources)
+- [x] Extended resources backed by DRA (`example.com/gpu: 1` in a pod's resources)
 - [x] Partitioned GPUs in the end-to-end suite (`make e2e-partitions`)
 - [ ] Gang scheduling in the end-to-end suite
 

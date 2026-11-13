@@ -53,6 +53,12 @@ func Text(w io.Writer, rep *explain.Report, o TextOptions) error {
 		}
 		b.WriteString(table("  ", rows))
 	}
+	if rep.Extended != "" {
+		if len(rep.Claims) == 0 {
+			fmt.Fprintf(&b, "\n%s\n", s.Bold("Claims"))
+		}
+		fmt.Fprintf(&b, "  %s   %s   %s\n", "(extended resources)", s.Yellow("pending"), s.Dim(rep.Extended+"; the scheduler creates this claim when it binds the pod"))
+	}
 
 	if len(rep.Nodes) > 0 {
 		fmt.Fprintf(&b, "\n%s %s\n", s.Bold("Nodes"), s.Dim("(allocator verdict · why)"))
@@ -142,6 +148,9 @@ func nodeRow(s Style, n explain.NodeReport) []cell {
 		mark = c("✗", s.Red)
 	}
 	why := nodeWhy(n)
+	if n.Note != "" {
+		why = strings.TrimPrefix(why+" · "+n.Note, " · ")
+	}
 	style := (func(string) string)(nil)
 	if !n.Agree {
 		why = "⚠ unexplained: allocator says " + map[bool]string{true: "fits", false: "no"}[n.Verdict.Fits] +

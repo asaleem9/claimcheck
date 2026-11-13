@@ -7,6 +7,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	resourceapi "k8s.io/api/resource/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/dynamic-resource-allocation/resourceclaim"
 	"k8s.io/utils/ptr"
 
@@ -161,12 +163,21 @@ func reserve(work *snapshot.Snapshot, pod *corev1.Pod, r *Report, node string) [
 	}
 	var devices []string
 	for i, alloc := range nr.Verdict.Allocation {
-		if i >= len(r.PendingClaims) {
-			break
-		}
-		claim, err := work.Claim(pod.Namespace, r.PendingClaims[i])
-		if err != nil {
-			continue
+		var claim *resourceapi.ResourceClaim
+		if i < len(r.PendingClaims) {
+			c, err := work.Claim(pod.Namespace, r.PendingClaims[i])
+			if err != nil {
+				continue
+			}
+			claim = c
+		} else {
+			// The claim for DRA-backed extended resources doesn't exist
+			// yet; record it so later members see its devices as taken.
+			work.ResourceClaims = append(work.ResourceClaims, resourceapi.ResourceClaim{ObjectMeta: metav1.ObjectMeta{
+				Namespace: pod.Namespace, Name: pod.Name + "-extended-resources",
+				UID: types.UID("claimcheck-extended-" + string(pod.UID)),
+			}})
+			claim = &work.ResourceClaims[len(work.ResourceClaims)-1]
 		}
 		claim.Status.Allocation = alloc.DeepCopy()
 		claim.Status.ReservedFor = append(claim.Status.ReservedFor, resourceapi.ResourceClaimConsumerReference{

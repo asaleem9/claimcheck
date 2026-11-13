@@ -1,0 +1,31 @@
+
+pod ml/legacy-train  (Pending)
+
+ BLOCKED   No eligible node can allocate the claims (3 nodes checked).
+
+Claims
+  (extended resources)   pending   example.com/gpu: 6 (DeviceClass gpu.example.com); the scheduler creates this claim when it binds the pod
+
+Nodes (allocator verdict · why)
+  control-plane   ✗   example.com/gpu: no devices
+  worker-a        ✗   example.com/gpu 4/6 usable
+  worker-b        ✗   example.com/gpu 4/6 usable
+
+Why
+  request "example.com/gpu" in ml/legacy-train-extended-resources: needs 6, 4 usable on worker-a, the closest node (8 devices considered).
+    8 usable devices exist across nodes, but a claim is allocated on a single node; the most on one node is 4.
+
+Devices on worker-a
+  REQUEST           DEVICE           RESULT     DETAIL
+  example.com/gpu   worker-a/gpu-0   ✓ usable   
+  example.com/gpu   worker-a/gpu-1   ✓ usable   
+  example.com/gpu   worker-a/gpu-2   ✓ usable   
+  example.com/gpu   worker-a/gpu-3   ✓ usable   
+
+Devices on worker-b
+  REQUEST           DEVICE           RESULT     DETAIL
+  example.com/gpu   worker-b/gpu-0   ✓ usable   
+  example.com/gpu   worker-b/gpu-1   ✓ usable   
+  example.com/gpu   worker-b/gpu-2   ✓ usable   
+  example.com/gpu   worker-b/gpu-3   ✓ usable   
+

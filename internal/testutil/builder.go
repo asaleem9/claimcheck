@@ -401,3 +401,42 @@ func (b *B) Member(ns, group, name string, claims ...string) *B {
 	p.Spec.SchedulingGroup = &corev1.PodSchedulingGroup{PodGroupName: ptr.To(group)}
 	return b
 }
+
+// ExtendedResource makes the last DeviceClass back an extended resource,
+// so pods can request it as e.g. example.com/gpu: 2.
+func (b *B) ExtendedResource(name string) *B {
+	c := &b.S.DeviceClasses[len(b.S.DeviceClasses)-1]
+	c.Spec.ExtendedResourceName = ptr.To(name)
+	return b
+}
+
+// Allocatable sets a node's allocatable extended resource, as a device
+// plugin would advertise it.
+func (b *B) Allocatable(node, resourceName, qty string) *B {
+	for i := range b.S.Nodes {
+		if b.S.Nodes[i].Name == node {
+			if b.S.Nodes[i].Status.Allocatable == nil {
+				b.S.Nodes[i].Status.Allocatable = corev1.ResourceList{}
+			}
+			b.S.Nodes[i].Status.Allocatable[corev1.ResourceName(resourceName)] = resource.MustParse(qty)
+		}
+	}
+	return b
+}
+
+// ResourcePod adds a pending pod whose containers request extended
+// resources directly, without ResourceClaims. init holds init containers.
+func (b *B) ResourcePod(ns, name string, init, containers []corev1.ResourceList) *B {
+	p := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name, UID: types.UID("uid-pod-" + name)},
+		Status:     corev1.PodStatus{Phase: corev1.PodPending},
+	}
+	for i, r := range init {
+		p.Spec.InitContainers = append(p.Spec.InitContainers, corev1.Container{Name: fmt.Sprintf("init-%d", i), Resources: corev1.ResourceRequirements{Requests: r, Limits: r}})
+	}
+	for i, r := range containers {
+		p.Spec.Containers = append(p.Spec.Containers, corev1.Container{Name: fmt.Sprintf("c-%d", i), Resources: corev1.ResourceRequirements{Requests: r, Limits: r}})
+	}
+	b.S.Pods = append(b.S.Pods, p)
+	return b
+}

@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	resourceapi "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 
@@ -251,6 +253,33 @@ var scenarios = []scenario{
 		status:   explain.Blocked,
 	},
 	{
+		name: "extended-resource",
+		build: func() *tu.B {
+			return tu.Standard().ExtendedResource("example.com/gpu").
+				ResourcePod("ml", "legacy-train", nil, []corev1.ResourceList{gpus(6)})
+		},
+		status: explain.Blocked,
+	},
+	{
+		name: "extended-resource-device-plugin",
+		build: func() *tu.B {
+			return tu.Standard().ExtendedResource("example.com/gpu").
+				Node("legacy-node", nil).Allocatable("legacy-node", "example.com/gpu", "8").
+				ResourcePod("ml", "legacy-train", nil, []corev1.ResourceList{gpus(6)})
+		},
+		status: explain.Fits,
+	},
+	{
+		name: "extended-resource-init-containers",
+		build: func() *tu.B {
+			// The init container's 4 GPUs are reused by the main containers
+			// (1 + 2), so the pod needs max(3, 4) = 4, which worker-a has.
+			return tu.Standard().ExtendedResource("example.com/gpu").
+				ResourcePod("ml", "prep-then-train", []corev1.ResourceList{gpus(4)}, []corev1.ResourceList{gpus(1), gpus(2)})
+		},
+		status: explain.Fits,
+	},
+	{
 		name: "shared-capacity-used-up",
 		build: func() *tu.B {
 			return sharedNIC().
@@ -473,4 +502,8 @@ func TestGangScenarios(t *testing.T) {
 			}
 		})
 	}
+}
+
+func gpus(n int) corev1.ResourceList {
+	return corev1.ResourceList{"example.com/gpu": *resource.NewQuantity(int64(n), resource.DecimalSI)}
 }

@@ -3,6 +3,7 @@ package snapshot
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -106,5 +107,21 @@ func FromCluster(ctx context.Context, cs kubernetes.Interface, contextName strin
 }
 
 func usesDRA(p *corev1.Pod) bool {
-	return len(p.Spec.ResourceClaims) > 0 || p.Status.ExtendedResourceClaimStatus != nil || p.Spec.SchedulingGroup != nil
+	if len(p.Spec.ResourceClaims) > 0 || p.Status.ExtendedResourceClaimStatus != nil || p.Spec.SchedulingGroup != nil {
+		return true
+	}
+	// Unscheduled pods asking for extended resources may get them from DRA.
+	if p.Spec.NodeName != "" {
+		return false
+	}
+	for _, cs := range [][]corev1.Container{p.Spec.InitContainers, p.Spec.Containers} {
+		for _, c := range cs {
+			for name := range c.Resources.Requests {
+				if domain, _, ok := strings.Cut(string(name), "/"); ok && (domain == "deviceclass.resource.kubernetes.io" || !strings.HasSuffix(domain, "kubernetes.io")) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

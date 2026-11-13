@@ -61,6 +61,8 @@ type NodeReport struct {
 	Agree bool `json:"agree"`
 	// Excluded explains why the pod can't use this node regardless of DRA.
 	Excluded string `json:"excluded,omitempty"`
+	// Note adds context, e.g. extended resources served by a device plugin.
+	Note string `json:"note,omitempty"`
 }
 
 type Report struct {
@@ -73,6 +75,9 @@ type Report struct {
 	Hints    []string     `json:"hints,omitempty"`
 	Notes    []string     `json:"notes,omitempty"`
 	FitNodes []string     `json:"fitNodes,omitempty"`
+	// Extended lists extended resources (e.g. example.com/gpu: 2) the
+	// scheduler would turn into a claim, with their DeviceClasses.
+	Extended string `json:"extended,omitempty"`
 	// PendingClaims lists the unallocated claims in the order the allocator
 	// received them; each node's verdict allocation follows this order.
 	PendingClaims []string `json:"pendingClaims,omitempty"`
@@ -86,6 +91,9 @@ type Options struct {
 	// ExtraClaims names claims (in the pod's namespace) to consider with
 	// the pod's own, such as claims shared by its PodGroup.
 	ExtraClaims []string
+
+	// extended holds the pod's DRA-backed extended resource requests.
+	extended []extendedDemand
 }
 
 // Pod explains why a pod's ResourceClaims can or can't be allocated.
@@ -145,8 +153,13 @@ func Pod(ctx context.Context, snap *snapshot.Snapshot, namespace, name string, o
 			pending = append(pending, claim)
 		}
 	}
-	if pod.Status.ExtendedResourceClaimStatus != nil {
-		rep.Notes = append(rep.Notes, "pod uses extended resources backed by DRA; those requests are not analyzed yet")
+	// Extended resources backed by DRA: before scheduling there's no claim
+	// yet, so build the one the scheduler would create, per node.
+	if pod.Status.ExtendedResourceClaimStatus == nil && pod.Spec.NodeName == "" {
+		if demands := extendedDemands(snap, pod); len(demands) > 0 {
+			rep.Extended = describeDemands(demands)
+			opts.extended = demands
+		}
 	}
 	return run(ctx, snap, rep, pod, pending, allocated, opts)
 }
@@ -177,7 +190,7 @@ func ResourceClaim(ctx context.Context, snap *snapshot.Snapshot, namespace, name
 }
 
 func run(ctx context.Context, snap *snapshot.Snapshot, rep *Report, pod *corev1.Pod, pending, allocated []*resourceapi.ResourceClaim, opts Options) (*Report, error) {
-	if len(pending) == 0 {
+	if len(pending) == 0 && len(opts.extended) == 0 {
 		rep.Status = Allocated
 		switch {
 		case len(rep.Claims) == 0:
@@ -215,8 +228,18 @@ func run(ctx context.Context, snap *snapshot.Snapshot, rep *Report, pod *corev1.
 	disagree, eligible := 0, 0
 	for _, node := range nodes {
 		nr := NodeReport{Node: node.Name, Excluded: excluded(opts.Features, pod, allocated, node)}
-		nr.Verdict = ev.Evaluate(ctx, node, pending)
-		nr.Diagnosis, err = dg.Diagnose(ctx, node, pending)
+		claims := pending
+		if len(opts.extended) > 0 {
+			ext, viaPlugin := extendedClaimFor(pod, opts.extended, node)
+			if ext != nil {
+				claims = append(append([]*resourceapi.ResourceClaim(nil), pending...), ext)
+			}
+			if len(viaPlugin) > 0 {
+				nr.Note = strings.Join(viaPlugin, ", ") + " comes from a device plugin on this node"
+			}
+		}
+		nr.Verdict = ev.Evaluate(ctx, node, claims)
+		nr.Diagnosis, err = dg.Diagnose(ctx, node, claims)
 		if err != nil {
 			return nil, fmt.Errorf("node %s: %w", node.Name, err)
 		}

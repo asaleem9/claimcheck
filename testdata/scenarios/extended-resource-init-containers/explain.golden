@@ -1,0 +1,30 @@
+
+pod ml/prep-then-train  (Pending)
+
+ FITS   The claims can be allocated on 2 of 3 eligible nodes.
+
+Claims
+  (extended resources)   pending   example.com/gpu: 4 (DeviceClass gpu.example.com); the scheduler creates this claim when it binds the pod
+
+Nodes (allocator verdict · why)
+  control-plane   ✗        example.com/gpu: no devices
+  worker-a        ✓ fits   example.com/gpu→gpu-0, example.com/gpu→gpu-1, example.com/gpu→gpu-2, example.com/gpu→gpu-3
+  worker-b        ✓ fits   example.com/gpu→gpu-0, example.com/gpu→gpu-1, example.com/gpu→gpu-2, example.com/gpu→gpu-3
+
+Notes
+  • the pod is Pending even though DRA would fit; check other scheduling constraints or whether the scheduler has retried since the cluster changed
+
+Devices on worker-a
+  REQUEST           DEVICE           RESULT     DETAIL
+  example.com/gpu   worker-a/gpu-0   ✓ usable   
+  example.com/gpu   worker-a/gpu-1   ✓ usable   
+  example.com/gpu   worker-a/gpu-2   ✓ usable   
+  example.com/gpu   worker-a/gpu-3   ✓ usable   
+
+Devices on worker-b
+  REQUEST           DEVICE           RESULT     DETAIL
+  example.com/gpu   worker-b/gpu-0   ✓ usable   
+  example.com/gpu   worker-b/gpu-1   ✓ usable   
+  example.com/gpu   worker-b/gpu-2   ✓ usable   
+  example.com/gpu   worker-b/gpu-3   ✓ usable   
+
