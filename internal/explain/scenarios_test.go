@@ -228,6 +228,29 @@ var scenarios = []scenario{
 		status:   explain.Blocked,
 	},
 	{
+		name: "compatibility-groups",
+		build: func() *tu.B {
+			parts := func(phys string) []tu.Partition {
+				return []tu.Partition{
+					{Name: phys + "-mig-0", Profile: "mig", Memory: "20Gi", Groups: []string{"mig"}},
+					{Name: phys + "-mig-1", Profile: "mig", Memory: "20Gi", Groups: []string{"mig"}},
+					{Name: phys + "-vgpu-0", Profile: "vgpu", Memory: "20Gi", Groups: []string{"vgpu"}},
+					{Name: phys + "-vgpu-1", Profile: "vgpu", Memory: "20Gi", Groups: []string{"vgpu"}},
+				}
+			}
+			return tu.New().Node("worker", nil).GPUClass().PartitionedSlice("worker", map[string]struct {
+				Memory     string
+				Partitions []tu.Partition
+			}{"gpu-0": {Memory: "80Gi", Partitions: parts("gpu-0")}, "gpu-1": {Memory: "80Gi", Partitions: parts("gpu-1")}}).
+				Allocated("ml", "inference", "worker", "gpu-0-mig-0").
+				Allocated("ml", "desktop", "worker", "gpu-1-mig-0").
+				Claim("ml", "vgpu", tu.Req{Name: "vgpu", Selectors: []string{`device.attributes["gpu.example.com"].profile == "vgpu"`}}).
+				Pod("ml", "vdi", nil, "vgpu")
+		},
+		features: "DRADeviceCompatibilityGroups=true",
+		status:   explain.Blocked,
+	},
+	{
 		name: "shared-capacity-used-up",
 		build: func() *tu.B {
 			return sharedNIC().

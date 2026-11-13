@@ -248,6 +248,8 @@ func reasonLabel(d diagnose.Device) string {
 		return "need disabled feature"
 	case diagnose.CountersExhausted:
 		return "counters used up"
+	case diagnose.Incompatible:
+		return "incompatible group"
 	case diagnose.PoolIncomplete:
 		return "pool incomplete"
 	case diagnose.CapacityUsedUp:

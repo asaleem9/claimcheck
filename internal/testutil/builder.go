@@ -255,6 +255,9 @@ type Partition struct {
 	Name    string
 	Profile string
 	Memory  string
+	// Groups are device compatibility groups (alpha): partitions on one GPU
+	// must share at least one.
+	Groups []string
 }
 
 // PartitionedSlice publishes physical GPUs as partitions that share a memory
@@ -298,8 +301,9 @@ func (b *B) PartitionedSlice(node string, gpus map[string]struct {
 					"memory": {Value: resource.MustParse(p.Memory)},
 				},
 				ConsumesCounters: []resourceapi.DeviceCounterConsumption{{
-					CounterSet: phys,
-					Counters:   map[string]resourceapi.Counter{"memory": {Value: resource.MustParse(p.Memory)}},
+					CounterSet:          phys,
+					Counters:            map[string]resourceapi.Counter{"memory": {Value: resource.MustParse(p.Memory)}},
+					CompatibilityGroups: p.Groups,
 				}},
 			})
 		}

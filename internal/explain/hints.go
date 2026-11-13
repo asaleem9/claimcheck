@@ -203,6 +203,8 @@ func requestHints(v *requestView) []string {
 			out = append(out, fmt.Sprintf("  %s can never give this request what it asks for: %s", of, histogram(b.details)))
 		case diagnose.CapacityError:
 			out = append(out, fmt.Sprintf("  computing capacity fails on %s: %s\n      the scheduler treats this as an error for the whole pod", of, firstKey(b.details)))
+		case diagnose.Incompatible:
+			out = append(out, fmt.Sprintf("  %s %s, but can't share a physical device with the partitions in use: %s", of, vb("matches", "match"), histogramN(b.details, 2)))
 		case diagnose.CountersExhausted:
 			out = append(out, fmt.Sprintf("  %s %s, but %s physical device has no counters left: %s", of, vb("matches", "match"), vb("its", "their"), histogramN(b.details, 2)))
 		case diagnose.PoolIncomplete:

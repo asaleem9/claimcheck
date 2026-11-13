@@ -194,6 +194,12 @@ type solver struct {
 	// capLeft and capInUse model shared devices with consumable capacity.
 	capLeft  func(structured.DeviceID) map[resourceapi.QualifiedName]resource.Quantity
 	capInUse func(structured.DeviceID) bool
+	// compat and compatBase model device compatibility groups.
+	compat     func(structured.DeviceID) []compatUse
+	compatBase map[string]groupState
+	// ignoreCompat solves without compatibility groups, to tell them apart
+	// from plain counter exhaustion when explaining.
+	ignoreCompat bool
 }
 
 // sharingMatters reports whether any option is a shared device, which one
@@ -360,6 +366,10 @@ func (s *solver) backtrack(slots []slot, distinct []constraintSpec) (found, exha
 		left[k] = v.DeepCopy()
 	}
 	chosen := make([]int, len(order))
+	groups := map[string]groupState{}
+	for k, v := range s.compatBase {
+		groups[k] = v
+	}
 	capLeft := map[structured.DeviceID]map[resourceapi.QualifiedName]resource.Quantity{}
 	shares := map[structured.DeviceID]int{}                // uses of each shared device in this search
 	sharedBy := map[structured.DeviceID]sets.Set[string]{} // requests already using it
@@ -423,6 +433,22 @@ func (s *solver) backtrack(slots []slot, distinct []constraintSpec) (found, exha
 					continue options
 				}
 			}
+			// Compatibility groups are checked with counters, and like them
+			// skipped for a shared device whose counters were already charged.
+			var cs []compatUse
+			if s.compat != nil && !s.ignoreCompat && !countersCharged {
+				cs = s.compat(id)
+			}
+			for _, c := range cs {
+				if !groups[c.key].admits(c.groups) {
+					continue options
+				}
+			}
+			prevGroups := make([]groupState, len(cs))
+			for i, c := range cs {
+				prevGroups[i] = groups[c.key]
+				groups[c.key] = groups[c.key].add(c.groups, id.Device.String())
+			}
 			if shared {
 				shares[id]++
 				if sharedBy[id] == nil {
@@ -469,6 +495,9 @@ func (s *solver) backtrack(slots []slot, distinct []constraintSpec) (found, exha
 					l.Add(u.qty)
 					left[u.key] = l
 				}
+			}
+			for i := len(cs) - 1; i >= 0; i-- {
+				groups[cs[i].key] = prevGroups[i]
 			}
 			if exhausted {
 				return false
@@ -517,6 +546,14 @@ func (s *solver) explain() (contention, counters, constraint string) {
 	}
 	if s.countersMatter(s.slots) {
 		if ok, unknown := s.solve(nil); !ok && !unknown {
+			if s.compat != nil {
+				s.ignoreCompat = true
+				okWithout, _ := s.solve(nil)
+				s.ignoreCompat = false
+				if okWithout {
+					return "", s.compatMessage(), ""
+				}
+			}
 			return "", s.counterMessage(), ""
 		}
 	}
@@ -703,6 +740,21 @@ func (s *solver) counterMessage() string {
 	sort.Strings(parts)
 	return fmt.Sprintf("%s need %d partitions, but together they use more of their shared counters than is left: %s",
 		strings.Join(reqs, " and "), len(s.slots), strings.Join(parts, " · "))
+}
+
+// compatMessage explains that partitions fit by counters but their
+// compatibility groups can't share one physical device.
+func (s *solver) compatMessage() string {
+	var reqs []string
+	seen := sets.New[string]()
+	for _, sl := range s.slots {
+		if !seen.Has(sl.request) {
+			seen.Insert(sl.request)
+			reqs = append(reqs, strconv.Quote(sl.request))
+		}
+	}
+	return fmt.Sprintf("%s need %d partitions, and there's room for them, but not with compatibility groups that can share a physical device",
+		strings.Join(reqs, " and "), len(s.slots))
 }
 
 func attrName(a resourceapi.FullyQualifiedName) string {

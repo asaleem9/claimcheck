@@ -12,6 +12,7 @@ import (
 
 	resourceapi "k8s.io/api/resource/v1"
 
+	"github.com/asaleem9/claimcheck/internal/diagnose"
 	"github.com/asaleem9/claimcheck/internal/explain"
 	"github.com/asaleem9/claimcheck/internal/features"
 	tu "github.com/asaleem9/claimcheck/internal/testutil"
@@ -65,7 +66,7 @@ func TestAgreement(t *testing.T) {
 	for seed := range uint64(iterations) {
 		r := rand.New(rand.NewPCG(seed, 42))
 		// Every other cluster enables the alpha features claimcheck models:
-		// CEL-derived and list-typed attributes.
+		// CEL-derived and list-typed attributes, compatibility groups.
 		alpha := seed%2 == 1
 		b := tu.New().GPUClass()
 		nodes := 1 + r.IntN(3)
@@ -97,6 +98,9 @@ func TestAgreement(t *testing.T) {
 					for i, prof := range []string{"full", "half", "half", "quarter", "quarter", "quarter", "quarter"} {
 						mem := map[string]string{"full": "80Gi", "half": "40Gi", "quarter": "20Gi"}[prof]
 						p := tu.Partition{Name: fmt.Sprintf("%s-p%d", name, i), Profile: prof, Memory: mem}
+						if alpha {
+							p.Groups = [][]string{nil, {"mig"}, {"vgpu"}, {"mig", "vgpu"}}[r.IntN(4)]
+						}
 						ps = append(ps, p)
 						all = append(all, p.Name)
 					}
@@ -209,7 +213,7 @@ func TestAgreement(t *testing.T) {
 
 		f := features.Default()
 		if alpha {
-			f.DerivedAttributes, f.ListTypeAttributes = true, true
+			f.DerivedAttributes, f.ListTypeAttributes, f.CompatibilityGroups = true, true, true
 		}
 		rep, err := explain.Pod(context.Background(), b.S, "ns", "pod", explain.Options{Features: f})
 		if err != nil {
@@ -238,12 +242,21 @@ func TestAgreement(t *testing.T) {
 				outcomes["error: "+msg]++
 			case n.Diagnosis.ConstraintFailure != "":
 				outcomes["constraint"]++
+			case strings.Contains(n.Diagnosis.CounterConflict, "compatibility groups"):
+				outcomes["compat-together"]++
 			case n.Diagnosis.CounterConflict != "":
 				outcomes["counters-together"]++
 			case n.Diagnosis.Contention != "":
 				outcomes["contention"]++
 			default:
 				outcomes["request-unsatisfied"]++
+			}
+			for _, rq := range n.Diagnosis.Requests {
+				for _, d := range rq.Devices {
+					if d.Reason == diagnose.Incompatible {
+						outcomes["incompatible-device"]++
+					}
+				}
 			}
 			if !n.Agree && len(n.Diagnosis.Unanalyzed) > 0 {
 				skipped++ // the solver gave up honestly; counted below

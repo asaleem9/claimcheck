@@ -1,0 +1,288 @@
+apiVersion: claimcheck.dev/v1alpha1
+deviceClasses:
+- metadata:
+    name: gpu.example.com
+  spec:
+    selectors:
+    - cel:
+        expression: device.driver == "gpu.example.com"
+kind: Snapshot
+metadata:
+  capturedAt: null
+nodes:
+- metadata:
+    labels:
+      kubernetes.io/hostname: worker
+    name: worker
+  spec: {}
+  status:
+    daemonEndpoints:
+      kubeletEndpoint:
+        Port: 0
+    nodeInfo:
+      architecture: ""
+      bootID: ""
+      containerRuntimeVersion: ""
+      kernelVersion: ""
+      kubeProxyVersion: ""
+      kubeletVersion: ""
+      machineID: ""
+      operatingSystem: ""
+      osImage: ""
+      systemUUID: ""
+pods:
+- metadata:
+    name: vdi
+    namespace: ml
+    uid: uid-pod-vdi
+  spec:
+    containers: null
+    resourceClaims:
+    - name: vgpu
+      resourceClaimName: vgpu
+  status:
+    phase: Pending
+resourceClaims:
+- metadata:
+    name: desktop
+    namespace: ml
+    uid: uid-ml-desktop
+  spec:
+    devices:
+      requests:
+      - exactly:
+          allocationMode: ExactCount
+          count: 1
+          deviceClassName: gpu.example.com
+        name: gpu
+  status:
+    allocation:
+      devices:
+        results:
+        - device: gpu-1-mig-0
+          driver: gpu.example.com
+          pool: worker
+          request: gpu
+      nodeSelector:
+        nodeSelectorTerms:
+        - matchFields:
+          - key: metadata.name
+            operator: In
+            values:
+            - worker
+- metadata:
+    name: inference
+    namespace: ml
+    uid: uid-ml-inference
+  spec:
+    devices:
+      requests:
+      - exactly:
+          allocationMode: ExactCount
+          count: 1
+          deviceClassName: gpu.example.com
+        name: gpu
+  status:
+    allocation:
+      devices:
+        results:
+        - device: gpu-0-mig-0
+          driver: gpu.example.com
+          pool: worker
+          request: gpu
+      nodeSelector:
+        nodeSelectorTerms:
+        - matchFields:
+          - key: metadata.name
+            operator: In
+            values:
+            - worker
+- metadata:
+    name: vgpu
+    namespace: ml
+    uid: uid-ml-vgpu
+  spec:
+    devices:
+      requests:
+      - exactly:
+          allocationMode: ExactCount
+          count: 1
+          deviceClassName: gpu.example.com
+          selectors:
+          - cel:
+              expression: device.attributes["gpu.example.com"].profile == "vgpu"
+        name: vgpu
+  status: {}
+resourceSlices:
+- metadata:
+    name: worker-counters
+  spec:
+    driver: gpu.example.com
+    nodeName: worker
+    pool:
+      generation: 0
+      name: worker
+      resourceSliceCount: 2
+    sharedCounters:
+    - counters:
+        memory:
+          value: 80Gi
+      name: gpu-0
+    - counters:
+        memory:
+          value: 80Gi
+      name: gpu-1
+- metadata:
+    name: worker-partitions
+  spec:
+    devices:
+    - attributes:
+        model:
+          string: H100
+        parent:
+          string: gpu-0
+        profile:
+          string: mig
+      capacity:
+        memory:
+          value: 20Gi
+      consumesCounters:
+      - compatibilityGroups:
+        - mig
+        counterSet: gpu-0
+        counters:
+          memory:
+            value: 20Gi
+      name: gpu-0-mig-0
+    - attributes:
+        model:
+          string: H100
+        parent:
+          string: gpu-0
+        profile:
+          string: mig
+      capacity:
+        memory:
+          value: 20Gi
+      consumesCounters:
+      - compatibilityGroups:
+        - mig
+        counterSet: gpu-0
+        counters:
+          memory:
+            value: 20Gi
+      name: gpu-0-mig-1
+    - attributes:
+        model:
+          string: H100
+        parent:
+          string: gpu-0
+        profile:
+          string: vgpu
+      capacity:
+        memory:
+          value: 20Gi
+      consumesCounters:
+      - compatibilityGroups:
+        - vgpu
+        counterSet: gpu-0
+        counters:
+          memory:
+            value: 20Gi
+      name: gpu-0-vgpu-0
+    - attributes:
+        model:
+          string: H100
+        parent:
+          string: gpu-0
+        profile:
+          string: vgpu
+      capacity:
+        memory:
+          value: 20Gi
+      consumesCounters:
+      - compatibilityGroups:
+        - vgpu
+        counterSet: gpu-0
+        counters:
+          memory:
+            value: 20Gi
+      name: gpu-0-vgpu-1
+    - attributes:
+        model:
+          string: H100
+        parent:
+          string: gpu-1
+        profile:
+          string: mig
+      capacity:
+        memory:
+          value: 20Gi
+      consumesCounters:
+      - compatibilityGroups:
+        - mig
+        counterSet: gpu-1
+        counters:
+          memory:
+            value: 20Gi
+      name: gpu-1-mig-0
+    - attributes:
+        model:
+          string: H100
+        parent:
+          string: gpu-1
+        profile:
+          string: mig
+      capacity:
+        memory:
+          value: 20Gi
+      consumesCounters:
+      - compatibilityGroups:
+        - mig
+        counterSet: gpu-1
+        counters:
+          memory:
+            value: 20Gi
+      name: gpu-1-mig-1
+    - attributes:
+        model:
+          string: H100
+        parent:
+          string: gpu-1
+        profile:
+          string: vgpu
+      capacity:
+        memory:
+          value: 20Gi
+      consumesCounters:
+      - compatibilityGroups:
+        - vgpu
+        counterSet: gpu-1
+        counters:
+          memory:
+            value: 20Gi
+      name: gpu-1-vgpu-0
+    - attributes:
+        model:
+          string: H100
+        parent:
+          string: gpu-1
+        profile:
+          string: vgpu
+      capacity:
+        memory:
+          value: 20Gi
+      consumesCounters:
+      - compatibilityGroups:
+        - vgpu
+        counterSet: gpu-1
+        counters:
+          memory:
+            value: 20Gi
+      name: gpu-1-vgpu-1
+    driver: gpu.example.com
+    nodeName: worker
+    pool:
+      generation: 0
+      name: worker
+      resourceSliceCount: 2

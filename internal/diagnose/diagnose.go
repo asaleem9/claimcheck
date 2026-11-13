@@ -41,6 +41,9 @@ const (
 	// CountersExhausted: a partition's shared counters (e.g. memory slices
 	// of its physical GPU) are used up by other allocated partitions.
 	CountersExhausted Reason = "CountersExhausted"
+	// Incompatible: the partition's compatibility groups don't overlap the
+	// partitions in use on the same physical device.
+	Incompatible Reason = "Incompatible"
 	// PoolIncomplete: the device's pool doesn't have all its ResourceSlices
 	// yet, so the allocator skips the whole pool.
 	PoolIncomplete Reason = "PoolIncomplete"
@@ -136,8 +139,8 @@ type Diagnoser struct {
 
 	latestGen    map[string]int64
 	counterCache *counterState
+	compatCache  map[string]groupState
 	incomplete   map[string]string
-	compatGroups bool
 }
 
 type candidate struct {
@@ -163,9 +166,6 @@ func (d *Diagnoser) Diagnose(ctx context.Context, node *corev1.Node, claims []*r
 		byID[structured.MakeDeviceID(c.slice.Spec.Driver, c.slice.Spec.Pool.Name, dev.Name)] = dev
 	}
 	var cons []constraintSpec
-	if d.compatGroups {
-		out.Unanalyzed = append(out.Unanalyzed, "device compatibility groups (DRADeviceCompatibilityGroups)")
-	}
 	for _, claim := range claims {
 		name := claim.Namespace + "/" + claim.Name
 		claimDevices := 0
@@ -256,6 +256,16 @@ type solverCounters struct {
 func newSolver(reqs []Request, cons []constraintSpec, value valueFunc, ctr *solverCounters) *solver {
 	s := &solver{slots: buildSlots(reqs), cons: cons, value: value, budget: backtrackBudget, left: ctr.left,
 		capInUse: ctr.diag.capacityInUse}
+	if ctr.diag.Features.CompatibilityGroups {
+		s.compatBase = ctr.diag.compatBaseline()
+		s.compat = func(id structured.DeviceID) []compatUse {
+			dev := ctr.byID[id]
+			if dev == nil {
+				return nil
+			}
+			return compatUses(id.Driver.String(), id.Pool.String(), dev)
+		}
+	}
 	s.capLeft = func(id structured.DeviceID) map[resourceapi.QualifiedName]resource.Quantity {
 		left := map[resourceapi.QualifiedName]resource.Quantity{}
 		dev := ctr.byID[id]
@@ -388,7 +398,6 @@ func (d *Diagnoser) devicesFor(node *corev1.Node) ([]candidate, error) {
 			if !d.Features.CompatibilityGroups {
 				continue // the allocator ignores the slice, like GatherPools
 			}
-			d.compatGroups = true
 		}
 		if d.Features.PartitionableDevices && len(s.Spec.SharedCounters) > 0 {
 			continue // a counter-set slice; the allocator ignores any devices in it
@@ -533,7 +542,7 @@ func (d *Diagnoser) request(ctx context.Context, claim, name string, a accessor,
 	selectable := 0
 	for _, c := range devices {
 		dev := d.device(ctx, c, class, a)
-		if dev.Reason == Available || dev.Reason == InUse || dev.Reason == Tainted || dev.Reason == FeatureDisabled || dev.Reason == CountersExhausted || dev.Reason == CapacityUsedUp {
+		if dev.Reason == Available || dev.Reason == InUse || dev.Reason == Tainted || dev.Reason == FeatureDisabled || dev.Reason == CountersExhausted || dev.Reason == CapacityUsedUp || dev.Reason == Incompatible {
 			selectable++
 		}
 		if dev.Reason == Available {
@@ -638,6 +647,12 @@ func (d *Diagnoser) device(ctx context.Context, c candidate, class *resourceapi.
 		return out
 	}
 	countersCharged := shareable && d.capacityInUse(id) // an earlier share already paid them
+	if d.Features.CompatibilityGroups && len(dev.ConsumesCounters) > 0 && !countersCharged {
+		if why := d.incompatible(out.Driver, out.Pool, dev); why != "" {
+			out.Reason, out.Detail = Incompatible, why
+			return out
+		}
+	}
 	if len(dev.ConsumesCounters) > 0 && !countersCharged {
 		if short := d.counterShortfall(out.Driver, out.Pool, dev); short != "" {
 			out.Reason, out.Detail = CountersExhausted, short

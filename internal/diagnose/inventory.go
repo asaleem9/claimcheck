@@ -208,6 +208,11 @@ func (d *Diagnoser) deviceView(ctx context.Context, s *resourceapi.ResourceSlice
 			}
 		}
 	}
+	if v.State == Free && len(dev.ConsumesCounters) > 0 && d.Features.CompatibilityGroups {
+		if why := d.incompatible(s.Spec.Driver, s.Spec.Pool.Name, dev); why != "" {
+			v.State, v.Detail = BlockedState, why
+		}
+	}
 	if v.State == Free && len(dev.ConsumesCounters) > 0 && d.Features.PartitionableDevices {
 		if short := d.counterShortfall(s.Spec.Driver, s.Spec.Pool.Name, dev); short != "" {
 			v.State, v.Detail = BlockedState, short

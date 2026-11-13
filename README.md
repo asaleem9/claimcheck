@@ -169,11 +169,20 @@ make demo   # explains testdata/scenarios/all-in-use/snapshot.yaml
 
 claimcheck explains DRA allocation. It doesn't re-run every scheduler filter. Node eligibility covers `spec.nodeName`, `nodeSelector`, and claims already pinned to a node, but not affinity, taints on nodes, or resource fit.
 
-The diagnosis models the stable and beta parts of DRA in v1.37: selectors, taints, `firstAvailable`, constraints, partitionable devices and consumable capacity. It doesn't yet model these alpha features, and reports `UNEXPLAINED` when they decide the outcome:
+The diagnosis models the DRA allocation features of v1.37, stable, beta and alpha:
+- selectors and DeviceClasses
+- taints and DeviceTaintRules
+- `firstAvailable`
+- `matchAttribute` and `distinctAttribute`, including over CEL-derived and list-typed attributes
+- partitionable devices with shared counters and compatibility groups
+- consumable capacity
 
-- CEL-derived attributes
-- list-typed attributes
-- device compatibility groups
+Alpha features need `--features`, since feature gates can't be read from the API.
+
+When the diagnosis can't account for a decision, claimcheck reports `UNEXPLAINED` instead of guessing. The known cases:
+- constraints on `adminAccess` requests
+- a search that exceeds its step budget
+- extended resources backed by DRA: these pod requests aren't analyzed yet, and claimcheck says so in a note
 
 ## Development
 
@@ -197,7 +206,8 @@ Each scenario in `testdata/scenarios/` has a `snapshot.yaml` and its expected `e
 - [x] `whatif`, including `--suggest` for the single change that would make it fit
 - [x] `pools`: free, used, tainted and fragmented devices per pool
 - [x] `explain podgroup/…` for gang-scheduled workloads (Workload / PodGroup API, beta in v1.37)
-- [ ] CEL-derived attributes, list-typed attributes and device compatibility groups (alpha in v1.37)
+- [x] CEL-derived attributes, list-typed attributes and device compatibility groups (alpha in v1.37)
+- [ ] Extended resources backed by DRA (`example.com/gpu: 1` in a pod's resources)
 - [x] Partitioned GPUs in the end-to-end suite (`make e2e-partitions`)
 - [ ] Gang scheduling in the end-to-end suite
 

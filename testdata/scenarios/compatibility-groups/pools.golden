@@ -1,0 +1,20 @@
+
+DRA capacity  1 node · 1 pool
+
+  DEVICECLASS       TOTAL   IN USE   SHARED   TAINTED   BLOCKED   UNAVAILABLE   FREE
+  gpu.example.com   8       2        0        0         4         0             2
+
+worker · pool worker  gpu.example.com
+  ██▒▒▒▒░░  2 in use · 4 blocked · 2 free
+  gpu-0 … gpu-1 (2) memory   █████░░░░░░░░░░░░░░░   20Gi of 80Gi used · largest free partition 20Gi
+    gpu-0-mig-0    █ in use    ml/inference
+    gpu-0-mig-1    ░ free      
+    gpu-0-vgpu-0   ▒ blocked   compatibility groups [vgpu] don't overlap [mig], required by gpu-0-mig-0 on counter set gpu-0
+    gpu-0-vgpu-1   ▒ blocked   compatibility groups [vgpu] don't overlap [mig], required by gpu-0-mig-0 on counter set gpu-0
+    gpu-1-mig-0    █ in use    ml/desktop
+    gpu-1-mig-1    ░ free      
+    gpu-1-vgpu-0   ▒ blocked   compatibility groups [vgpu] don't overlap [mig], required by gpu-1-mig-0 on counter set gpu-1
+    gpu-1-vgpu-1   ▒ blocked   compatibility groups [vgpu] don't overlap [mig], required by gpu-1-mig-0 on counter set gpu-1
+
+legend  █ in use ▓ shared ▚ tainted ▒ blocked × unavailable ░ free
+
