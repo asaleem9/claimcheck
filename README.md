@@ -4,6 +4,8 @@
 
 `kubectl claimcheck` replays the scheduler's own [Dynamic Resource Allocation](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/) allocator against your cluster and tells you, device by device, why a `ResourceClaim` can't be satisfied.
 
+![claimcheck explaining a Pending pod on a kind cluster](docs/demo.gif)
+
 ```
 $ kubectl claimcheck explain pod/llm-train -n ml
 
