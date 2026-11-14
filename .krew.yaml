@@ -20,28 +20,53 @@ spec:
         os: linux
         arch: amd64
     {{ addURIAndSha "https://github.com/asaleem9/claimcheck/releases/download/{{ .TagName }}/kubectl-claimcheck_linux_amd64.tar.gz" .TagName }}
+    files:
+    - from: kubectl-claimcheck
+      to: .
+    - from: LICENSE
+      to: .
     bin: kubectl-claimcheck
   - selector:
       matchLabels:
         os: linux
         arch: arm64
     {{ addURIAndSha "https://github.com/asaleem9/claimcheck/releases/download/{{ .TagName }}/kubectl-claimcheck_linux_arm64.tar.gz" .TagName }}
+    files:
+    - from: kubectl-claimcheck
+      to: .
+    - from: LICENSE
+      to: .
     bin: kubectl-claimcheck
   - selector:
       matchLabels:
         os: darwin
         arch: amd64
     {{ addURIAndSha "https://github.com/asaleem9/claimcheck/releases/download/{{ .TagName }}/kubectl-claimcheck_darwin_amd64.tar.gz" .TagName }}
+    files:
+    - from: kubectl-claimcheck
+      to: .
+    - from: LICENSE
+      to: .
     bin: kubectl-claimcheck
   - selector:
       matchLabels:
         os: darwin
         arch: arm64
     {{ addURIAndSha "https://github.com/asaleem9/claimcheck/releases/download/{{ .TagName }}/kubectl-claimcheck_darwin_arm64.tar.gz" .TagName }}
+    files:
+    - from: kubectl-claimcheck
+      to: .
+    - from: LICENSE
+      to: .
     bin: kubectl-claimcheck
   - selector:
       matchLabels:
         os: windows
         arch: amd64
     {{ addURIAndSha "https://github.com/asaleem9/claimcheck/releases/download/{{ .TagName }}/kubectl-claimcheck_windows_amd64.zip" .TagName }}
+    files:
+    - from: kubectl-claimcheck.exe
+      to: .
+    - from: LICENSE
+      to: .
     bin: kubectl-claimcheck.exe
